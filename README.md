@@ -46,9 +46,7 @@ binaries are shipped.
 
   services.misskey-media-proxy = {
     enable = true;
-    host = "0.0.0.0";
     port = 3000;
-    openFirewall = true;
 
     # Written to config.js (see below for the available options)
     settings = {
@@ -67,6 +65,8 @@ binaries are shipped.
 
 The module generates `config.js` from `settings`, points the service at it via
 `MISSKEY_MEDIA_PROXY_CONFIG`, and runs the server as a hardened `DynamicUser`.
+The server always binds to `127.0.0.1`; put a reverse proxy in front of it if it
+needs to be reachable from elsewhere.
 
 ## Development
 

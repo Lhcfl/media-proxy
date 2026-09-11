@@ -9,7 +9,9 @@ const configPath = process.env.MISSKEY_MEDIA_PROXY_CONFIG ?? './config.js';
 const { default: config } = await import(pathToFileURL(resolve(process.cwd(), configPath)).href);
 
 const port = Number(process.env.PORT ?? 3000);
-const host = process.env.HOST ?? '0.0.0.0';
+// The proxy is meant to run behind a reverse proxy and must not be exposed
+// directly, so it always binds to loopback.
+const host = '127.0.0.1';
 
 const fastify = Fastify({
     logger: process.env.NODE_ENV !== 'test',

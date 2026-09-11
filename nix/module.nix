@@ -23,23 +23,10 @@ in
       description = "The misskey-media-proxy package to use.";
     };
 
-    host = lib.mkOption {
-      type = lib.types.str;
-      default = "127.0.0.1";
-      example = "0.0.0.0";
-      description = "Address the server listens on.";
-    };
-
     port = lib.mkOption {
       type = lib.types.port;
       default = 3000;
       description = "Port the server listens on.";
-    };
-
-    openFirewall = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = "Open {option}`port` in the firewall.";
     };
 
     environmentFile = lib.mkOption {
@@ -78,7 +65,6 @@ in
       after = [ "network-online.target" ];
 
       environment = {
-        HOST = cfg.host;
         PORT = toString cfg.port;
         MISSKEY_MEDIA_PROXY_CONFIG = configFile;
       };
@@ -106,7 +92,5 @@ in
         ];
       };
     };
-
-    networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.port ];
   };
 }
