@@ -39,7 +39,7 @@ binaries are shipped.
 
 ```nix
 {
-  inputs.misskey-media-proxy.url = "github:you/flake-misskey-media-proxy";
+  inputs.misskey-media-proxy.url = "github:Lhcfl/media-proxy";
 
   # in a NixOS configuration
   imports = [ inputs.misskey-media-proxy.nixosModules.default ];
