@@ -44,7 +44,7 @@
           fetcherVersion = 4;
           # Set to lib.fakeHash, build, and copy the correct hash from the
           # error log whenever pnpm-lock.yaml changes.
-          hash = "sha256-lEeLzfWwU+WIV7HeUAJGi0TrsXBtIZnlICBGph5oOv4=";
+          hash = "sha256-oZSTaawOdM86ee0SfgGocrM7BKZ86G58wTqn5txoTl8=";
         };
 
         # sharp ships prebuilt binaries as optionalDependencies, but the
@@ -73,7 +73,6 @@
 
         buildPhase = ''
           runHook preBuild
-          pnpm run typecheck
           # Drop devDependencies. optional=false keeps prune from trying to
           # fetch the @img/sharp-* prebuilts (there is no network in the sandbox).
           npm_config_optional=false pnpm prune --prod

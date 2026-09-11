@@ -15,9 +15,9 @@ media, validates it, optionally converts images with
 - Updated all dependencies, notably:
   - `fastify` 4 → 5, `@fastify/static` 6 → 10
   - `sharp` 0.32 → 0.35 (and `@misskey-dev/sharp-read-bmp` 1.1 → 1.3)
-  - `file-type` 19 → 22, `got` 13 → 14, `content-disposition` 0.5 → 3
+  - `file-type` 19 → 22, `got` 13 → 16, `content-disposition` 0.5 → 3
   - `is-svg` 5 → 6, `ipaddr.js` 2.1 → 2.5, `tmp` 0.2.1 → 0.2.7
-  - TypeScript 5.3 → 5.9, Node.js 20 → 26
+  - TypeScript 5.3 → 7.0, Node.js 20 → 26
 - Replaced `fastify-cli` with a small `start.js` entry point.
   `fastify-cli@8.0.1` currently crashes with `pkgUp is not a function` because it
   requires the ESM-only `pkg-up@5`.
