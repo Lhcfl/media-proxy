@@ -17,10 +17,13 @@ media, validates it, optionally converts images with
   - `sharp` 0.32 → 0.35 (and `@misskey-dev/sharp-read-bmp` 1.1 → 1.3)
   - `file-type` 19 → 22, `got` 13 → 14, `content-disposition` 0.5 → 3
   - `is-svg` 5 → 6, `ipaddr.js` 2.1 → 2.5, `tmp` 0.2.1 → 0.2.7
-  - TypeScript 5.3 → 5.9, Node.js 20 → 24
+  - TypeScript 5.3 → 5.9, Node.js 20 → 26
 - Replaced `fastify-cli` with a small `start.js` entry point.
   `fastify-cli@8.0.1` currently crashes with `pkgUp is not a function` because it
   requires the ESM-only `pkg-up@5`.
+- Removed the build step: Node.js runs the TypeScript sources directly using
+  type stripping, so local imports use `.ts` extensions, the sources are shipped
+  as-is, and `tsc` is only used for type-checking.
 - Turned HTTP/2 off for downloads (taken from upstream PR #13) and dropped the
   unused `ip-cidr` / `private-ip` dependencies.
 - Added a Nix flake and a NixOS module.
@@ -70,15 +73,19 @@ needs to be reachable from elsewhere.
 
 ## Development
 
-Requires Node.js 24 and pnpm 10.
+Requires Node.js 26 and pnpm 10. Node.js executes the TypeScript sources
+natively (type stripping), so there is no build step.
 
 ```fish
 pnpm install
-pnpm run build   # tsc
-pnpm start       # node ./start.js
+pnpm run typecheck   # tsc, type-check only
+pnpm start           # node ./start.js
 ```
 
-`pnpm dev` runs `tsc --watch` and `node --watch ./start.js` together.
+`pnpm dev` runs `node --watch ./start.js`.
+
+Type stripping only supports erasable syntax, so type-only imports must use
+`import type` (enforced by `verbatimModuleSyntax` in `tsconfig.json`).
 
 If you build sharp from source instead of using the prebuilt binaries, add
 `node-addon-api` (already a devDependency) and have `libvips` + `pkg-config`
@@ -130,7 +137,7 @@ described in [`SPECIFICATION.md`](./SPECIFICATION.md).
 ```fish
 pnpm update --latest
 pnpm install
-pnpm run build
+pnpm run typecheck
 ```
 
 When `pnpm-lock.yaml` changes, reset `pnpmDeps.hash` in

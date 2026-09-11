@@ -2,7 +2,7 @@ import * as http from 'node:http';
 import * as https from 'node:https';
 import CacheableLookup from 'cacheable-lookup';
 import { HttpProxyAgent, HttpsProxyAgent } from 'hpagent';
-import { LookupFunction } from 'node:net';
+import type { LookupFunction } from 'node:net';
 
 const cache = new CacheableLookup({
     maxTtl: 3600,	// 1hours

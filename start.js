@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import Fastify from 'fastify';
-import app from './built/index.js';
+import app from './src/index.ts';
 
 // Match the upstream behaviour of reading config.js from the current working
 // directory, but allow overriding the location (used by the NixOS module).

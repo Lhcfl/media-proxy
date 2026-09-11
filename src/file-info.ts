@@ -62,7 +62,7 @@ async function checkSvg(path: string) {
     }
 }
 
-import { FILE_TYPE_BROWSERSAFE } from './const.js';
+import { FILE_TYPE_BROWSERSAFE } from './const.ts';
 
 const dictionary = {
     'safe-file': FILE_TYPE_BROWSERSAFE,

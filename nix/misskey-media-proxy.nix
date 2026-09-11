@@ -6,7 +6,7 @@
       lib = pkgs.lib;
       version = (lib.importJSON ../package.json).version;
 
-      nodejs = pkgs.nodejs_24;
+      nodejs = pkgs.nodejs_26;
       # node-gyp wrapper that uses the local Node.js headers (no download).
       nodeGyp = pkgs.node-gyp.override { inherit nodejs; };
       pnpm = pkgs.pnpm_10;
@@ -44,7 +44,7 @@
           fetcherVersion = 4;
           # Set to lib.fakeHash, build, and copy the correct hash from the
           # error log whenever pnpm-lock.yaml changes.
-          hash = "sha256-gJ3nDlrdUq/uk84CL27mqtcThQs9qlO/HqGPYX/6RZQ=";
+          hash = "sha256-lEeLzfWwU+WIV7HeUAJGi0TrsXBtIZnlICBGph5oOv4=";
         };
 
         # sharp ships prebuilt binaries as optionalDependencies, but the
@@ -73,7 +73,7 @@
 
         buildPhase = ''
           runHook preBuild
-          pnpm run build
+          pnpm run typecheck
           # Drop devDependencies. optional=false keeps prune from trying to
           # fetch the @img/sharp-* prebuilts (there is no network in the sandbox).
           npm_config_optional=false pnpm prune --prod
@@ -87,7 +87,7 @@
           runHook preInstall
 
           mkdir -p $out/lib/misskey-media-proxy
-          cp -r built start.js server.js package.json node_modules assets \
+          cp -r src start.js server.js package.json node_modules assets \
             $out/lib/misskey-media-proxy/
 
           mkdir -p $out/bin

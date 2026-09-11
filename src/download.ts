@@ -5,8 +5,8 @@ import * as http from 'node:http';
 import * as https from 'node:https';
 import ipaddr from 'ipaddr.js';
 import got, * as Got from 'got';
-import { StatusError } from './status-error.js';
-import { getAgents } from './http.js';
+import { StatusError } from './status-error.ts';
+import { getAgents } from './http.ts';
 import { parse } from 'content-disposition';
 
 const pipeline = util.promisify(stream.pipeline);

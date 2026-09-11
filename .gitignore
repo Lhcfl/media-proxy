@@ -59,9 +59,6 @@ profile*
 
 config.js
 
-# Build output
-built
-
 # Nix
 result
 result-*
