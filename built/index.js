@@ -11,7 +11,7 @@ import { sharpBmp } from '@misskey-dev/sharp-read-bmp';
 import { StatusError } from './status-error.js';
 import { defaultDownloadConfig, downloadUrl } from './download.js';
 import { getAgents } from './http.js';
-import _contentDisposition from 'content-disposition';
+import { create as createContentDisposition } from 'content-disposition';
 const _filename = fileURLToPath(import.meta.url);
 const _dirname = dirname(_filename);
 const assets = `${_dirname}/../assets/`;
@@ -226,5 +226,5 @@ function correctFilename(filename, ext) {
 }
 function contentDisposition(type, filename) {
     const fallback = filename.replace(/[^\w.-]/g, '_');
-    return _contentDisposition(filename, { type, fallback });
+    return createContentDisposition(filename, { type, fallback });
 }

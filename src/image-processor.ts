@@ -1,4 +1,4 @@
-import sharp from 'sharp';
+import sharp, { type Sharp, type WebpOptions } from 'sharp';
 import { Readable } from 'node:stream';
 
 export type IImage = {
@@ -15,7 +15,7 @@ export type IImageStream = {
 
 export type IImageStreamable = IImage | IImageStream;
 
-export const webpDefault: sharp.WebpOptions = {
+export const webpDefault: WebpOptions = {
     quality: 77,
     alphaQuality: 95,
     lossless: false,
@@ -25,11 +25,11 @@ export const webpDefault: sharp.WebpOptions = {
     effort: 2,
 };
 
-export function convertToWebpStream(path: string, width: number, height: number, options: sharp.WebpOptions = webpDefault): IImageStream {
+export function convertToWebpStream(path: string, width: number, height: number, options: WebpOptions = webpDefault): IImageStream {
     return convertSharpToWebpStream(sharp(path), width, height, options);
 }
 
-export function convertSharpToWebpStream(sharp: sharp.Sharp, width: number, height: number, options: sharp.WebpOptions = webpDefault): IImageStream {
+export function convertSharpToWebpStream(sharp: Sharp, width: number, height: number, options: WebpOptions = webpDefault): IImageStream {
     const data = sharp
         .resize(width, height, {
             fit: 'inside',

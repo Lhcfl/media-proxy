@@ -58,3 +58,8 @@ profile*
 *flamegraph*
 
 config.js
+
+# Nix
+result
+result-*
+.direnv/

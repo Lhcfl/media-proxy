@@ -1,58 +1,93 @@
-# Media Proxy for Misskey
+# misskey-media-proxy (maintained fork)
 
-[→ メディアプロキシの仕様](./SPECIFICATION.md)
+This repository is a maintained fork of
+[`misskey-dev/media-proxy`](https://github.com/misskey-dev/media-proxy). Upstream
+has not been updated since early 2024, so this fork keeps the code base and its
+dependencies current and ships a Nix flake for building and running it.
 
-Misskeyの/proxyが単体で動作します（Misskeyのコードがほぼそのまま移植されています）。
+The proxy implements the Misskey media proxy HTTP API: it downloads remote
+media, validates it, optionally converts images with
+[sharp](https://sharp.pixelplumbing.com/), and caches the result. See
+[`SPECIFICATION.md`](./SPECIFICATION.md) for the API details.
 
-**Fastifyプラグインとして動作する気がします。**  
-`pnpm start`は[fastify-cli](https://github.com/fastify/fastify-cli)が動作します。
+## Changes from upstream
 
-一応AWS Lambdaで動かす実装を用意しましたが、全くおすすめしません。
-https://github.com/tamaina/media-proxy-lambda
+- Updated all dependencies, notably:
+  - `fastify` 4 → 5, `@fastify/static` 6 → 10
+  - `sharp` 0.32 → 0.35 (and `@misskey-dev/sharp-read-bmp` 1.1 → 1.3)
+  - `file-type` 19 → 22, `got` 13 → 14, `content-disposition` 0.5 → 3
+  - `is-svg` 5 → 6, `ipaddr.js` 2.1 → 2.5, `tmp` 0.2.1 → 0.2.7
+  - TypeScript 5.3 → 5.9, Node.js 20 → 24
+- Replaced `fastify-cli` with a small `start.js` entry point.
+  `fastify-cli@8.0.1` currently crashes with `pkgUp is not a function` because it
+  requires the ESM-only `pkg-up@5`.
+- Turned HTTP/2 off for downloads (taken from upstream PR #13) and dropped the
+  unused `ip-cidr` / `private-ip` dependencies.
+- Added a Nix flake and a NixOS module.
 
-Sharp.jsを使っているため、メモリアロケータにjemallocを指定することをお勧めします。
+## Nix
 
-## Fastifyプラグインとして動作させる
-### npm install
-
-```
-npm install git+https://github.com/misskey-dev/media-proxy.git
-```
-
-### Fastifyプラグインを書く
-```
-import MediaProxy from 'misskey-media-proxy';
-
-// ......
-
-fastify.register(MediaProxy);
-```
-
-オプションを指定できます。オプションの内容はindex.tsのMediaProxyOptionsに指定してあります。
-
-## サーバーのセットアップ方法
-まずはgit cloneしてcdしてください。
-
-```
-git clone https://github.com/misskey-dev/media-proxy.git
-cd media-proxy
+```fish
+nix build          # build packages.<system>.default
+nix run            # run the proxy (reads config.js from $PWD)
 ```
 
-### jemallocをインストール
-Debian/Ubuntuのaptの場合
+The derivation builds sharp against the `libvips` from nixpkgs, so no prebuilt
+binaries are shipped.
 
-```
-sudo apt install libjemalloc2
+### NixOS module
+
+```nix
+{
+  inputs.misskey-media-proxy.url = "github:you/flake-misskey-media-proxy";
+
+  # in a NixOS configuration
+  imports = [ inputs.misskey-media-proxy.nixosModules.default ];
+
+  services.misskey-media-proxy = {
+    enable = true;
+    host = "0.0.0.0";
+    port = 3000;
+    openFirewall = true;
+
+    # Written to config.js (see below for the available options)
+    settings = {
+      userAgent = "MisskeyMediaProxy";
+      allowedPrivateNetworks = [ ];
+      maxSize = 262144000;
+      "Access-Control-Allow-Origin" = "*";
+      "Access-Control-Allow-Headers" = "*";
+      "Content-Security-Policy" =
+        "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'";
+      # proxy = "http://127.0.0.1:3128";
+    };
+  };
+}
 ```
 
-### pnpm install
-```
-NODE_ENV=production pnpm install
+The module generates `config.js` from `settings`, points the service at it via
+`MISSKEY_MEDIA_PROXY_CONFIG`, and runs the server as a hardened `DynamicUser`.
+
+## Development
+
+Requires Node.js 24 and pnpm 10.
+
+```fish
+pnpm install
+pnpm run build   # tsc
+pnpm start       # node ./start.js
 ```
 
-### config.jsを追加
+`pnpm dev` runs `tsc --watch` and `node --watch ./start.js` together.
 
-次のような内容で、設定ファイルconfig.jsをルートに作成してください。
+If you build sharp from source instead of using the prebuilt binaries, add
+`node-addon-api` (already a devDependency) and have `libvips` + `pkg-config`
+available, then run `SHARP_FORCE_GLOBAL_LIBVIPS=1 node-gyp rebuild --directory=node_modules/sharp/src`.
+
+### config.js
+
+Create `config.js` in the working directory (`start.js` imports it by default;
+set `MISSKEY_MEDIA_PROXY_CONFIG` to use another path):
 
 ```js
 import { readFileSync } from 'node:fs';
@@ -60,13 +95,13 @@ import { readFileSync } from 'node:fs';
 const repo = JSON.parse(readFileSync('./package.json', 'utf8'));
 
 export default {
-    // UA
+    // User-Agent used for downloads
     userAgent: `MisskeyMediaProxy/${repo.version}`,
 
-    // プライベートネットワークでも許可するIP CIDR（default.ymlと同じ）
+    // Private network ranges to allow (same as default.yml)
     allowedPrivateNetworks: [],
 
-    // ダウンロードするファイルの最大サイズ (bytes)
+    // Maximum download size in bytes
     maxSize: 262144000,
 
     // CORS
@@ -76,62 +111,33 @@ export default {
     // CSP
     'Content-Security-Policy': `default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'`,
 
-    // フォワードプロキシ
+    // Forward proxy
     // proxy: 'http://127.0.0.1:3128'
-}
+};
 ```
 
-### サーバーを立てる
-適当にサーバーを公開してください。  
-（ここではmediaproxy.example.comで公開するものとします。）
+The only required options are `userAgent`, `allowedPrivateNetworks` and
+`maxSize`; everything else is optional.
 
-メモ書き程度にsystemdでの開始方法を残します。  
-（サーバーレスだとsharp.jsが動かない可能性が高いため、そこはなんとかしてください）
+### API
 
-systemdサービスのファイルを作成…
+Requests are served as `GET /proxy?url=<url>` (or `GET /<host>/<path>`), with
+`emoji`, `avatar`, `static`, `preview`, `badge` and `fallback` query flags as
+described in [`SPECIFICATION.md`](./SPECIFICATION.md).
 
-/etc/systemd/system/misskey-proxy.service
+## Updating dependencies
 
-エディタで開き、以下のコードを貼り付けて保存
-
-ユーザーやポートは適宜変更すること。  
-また、arm64の場合`Environment="LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2"`のx86_64をaarch64に変更する必要がある。jemallocのパスはディストリビューションによって変わる可能性がある。
-
-```systemd
-[Unit]
-Description=Misskey Media Proxy
-
-[Service]
-Type=simple
-User=misskey
-ExecStart=/usr/bin/npm start
-WorkingDirectory=/home/misskey/media-proxy
-Environment="LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2"
-Environment="NODE_ENV=production"
-Environment="PORT=3000"
-TimeoutSec=60
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=media-proxy
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
+```fish
+pnpm update --latest
+pnpm install
+pnpm run build
 ```
 
-```
-sudo systemctl daemon-reload
-sudo systemctl enable misskey-proxy
-sudo systemctl start misskey-proxy
-```
+When `pnpm-lock.yaml` changes, reset `pnpmDeps.hash` in
+`nix/misskey-media-proxy.nix` to `lib.fakeHash`, run `nix build`, and copy the
+correct hash from the error message.
 
-3000ポートまでnginxなどでルーティングしてやります。
+## License
 
-### Misskeyのdefault.ymlに追記
-
-mediaProxyの指定をdefault.ymlに追記し、Misskeyを再起動してください。
-
-```yml
-mediaProxy: https://mediaproxy.example.com
-```
-
+AGPL-3.0-or-later, see [`LICENSE`](./LICENSE). Original work by syuilo and
+tamaina.

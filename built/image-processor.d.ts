@@ -1,6 +1,4 @@
-/// <reference types="node" resolution-mode="require"/>
-/// <reference types="node" resolution-mode="require"/>
-import sharp from 'sharp';
+import { type Sharp, type WebpOptions } from 'sharp';
 import { Readable } from 'node:stream';
 export type IImage = {
     data: Buffer;
@@ -13,6 +11,6 @@ export type IImageStream = {
     type: string;
 };
 export type IImageStreamable = IImage | IImageStream;
-export declare const webpDefault: sharp.WebpOptions;
-export declare function convertToWebpStream(path: string, width: number, height: number, options?: sharp.WebpOptions): IImageStream;
-export declare function convertSharpToWebpStream(sharp: sharp.Sharp, width: number, height: number, options?: sharp.WebpOptions): IImageStream;
+export declare const webpDefault: WebpOptions;
+export declare function convertToWebpStream(path: string, width: number, height: number, options?: WebpOptions): IImageStream;
+export declare function convertSharpToWebpStream(sharp: Sharp, width: number, height: number, options?: WebpOptions): IImageStream;
