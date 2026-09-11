@@ -89,6 +89,11 @@ in
           "AF_INET"
           "AF_INET6"
           "AF_UNIX"
+          # cacheable-lookup calls os.networkInterfaces() at startup, which uses
+          # getifaddrs() -> a NETLINK_ROUTE socket. Without AF_NETLINK this fails
+          # with "uv_interface_addresses returned Unknown system error 97"
+          # (EAFNOSUPPORT) and the service crash-loops.
+          "AF_NETLINK"
         ];
       };
     };
