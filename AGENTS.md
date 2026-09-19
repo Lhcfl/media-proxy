@@ -9,9 +9,10 @@ an HTTP media proxy for Misskey that downloads remote media, validates it,
 optionally converts images with `sharp`, and streams the result back.
 
 It runs on **Bun** (`Bun.serve`, TypeScript sources executed directly — no build
-step). The HTTP API is specified in [`SPECIFICATION.md`](./SPECIFICATION.md)
-(Japanese); keep behaviour in sync with it, except for the intentional
-deviations noted there and in the README.
+step). The HTTP API is specified in [`spec/`](./spec/README.md) (the Japanese
+file is authoritative; English and Chinese translations are included); keep
+behaviour in sync with it, except for the intentional deviations noted there
+and in the README.
 
 ## Commands
 

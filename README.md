@@ -5,8 +5,7 @@
 Nix flake 用于构建和运行。
 
 该代理实现了 Misskey 的媒体代理 HTTP API：下载远端媒体、校验类型、可选地用
-[sharp](https://sharp.pixelplumbing.com/) 转换图片，并缓存结果。API 细节见
-[`SPECIFICATION.md`](./SPECIFICATION.md)。
+[sharp](https://sharp.pixelplumbing.com/) 转换图片，并缓存结果。API 细节见 [`spec/`](./spec/README.md)（日文原文 + 中/英翻译）。
 
 它运行在 [Bun](https://bun.com) 上，HTTP 服务器使用 `Bun.serve`。保留 `sharp`
 等原生依赖，是因为它们提供 Bun 内置能力无法完全替代的图像编解码覆盖、下载/SSRF
@@ -132,7 +131,7 @@ maxConcurrentConversions = 4
 
 请求形式为 `GET /proxy?url=<url>`（或 `GET /<host>/<path>`），支持 `emoji`、
 `avatar`、`static`、`preview`、`badge`、`fallback` 查询参数，详见
-[`SPECIFICATION.md`](./SPECIFICATION.md)。
+[`spec/`](./spec/README.md)（日文原文；另有中文/英文翻译）。
 
 ## 更新依赖
 
