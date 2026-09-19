@@ -9,20 +9,28 @@ export class Semaphore {
 		this.permits = Math.max(1, permits);
 	}
 
-	async acquire(): Promise<() => void> {
+	/**
+	 * Acquires a permit. The returned value is `Disposable`, so
+	 * `using permit = await semaphore.acquire()` releases it on scope exit.
+	 */
+	async acquire(): Promise<Disposable> {
 		if (this.permits > 0) {
 			this.permits--;
-			return this.release;
+		} else {
+			await new Promise<void>((resolve) => this.waiting.push(resolve));
 		}
-		await new Promise<void>((resolve) => this.waiting.push(resolve));
-		return this.release;
-	}
 
-	private readonly release = (): void => {
-		const next = this.waiting.shift();
-		if (next) next();
-		else this.permits++;
-	};
+		let released = false;
+		return {
+			[Symbol.dispose]: () => {
+				if (released) return;
+				released = true;
+				const next = this.waiting.shift();
+				if (next) next();
+				else this.permits++;
+			},
+		};
+	}
 }
 
 export function baseHeaders(config: ResolvedConfig): Headers {

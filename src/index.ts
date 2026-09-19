@@ -222,12 +222,8 @@ async function withPermit<T>(
 	semaphore: Semaphore,
 	fn: () => Promise<T>,
 ): Promise<T> {
-	const release = await semaphore.acquire();
-	try {
-		return await fn();
-	} finally {
-		release();
-	}
+	using _permit = await semaphore.acquire();
+	return await fn();
 }
 
 function fileResponse(
