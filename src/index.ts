@@ -1,289 +1,191 @@
 import * as fs from 'node:fs';
-import * as http from 'node:http';
-import * as https from 'node:https';
-import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
-import fastifyStatic from '@fastify/static';
-import { createTemp } from './create-temp.ts';
-import { FILE_TYPE_BROWSERSAFE } from './const.ts';
-import { convertToWebpStream, webpDefault, convertSharpToWebpStream } from './image-processor.ts';
-import type { IImageStreamable } from './image-processor.ts';
-import type { FastifyInstance, FastifyRequest, FastifyReply, FastifyPluginOptions } from 'fastify';
-import { detectType, isMimeImage } from './file-info.ts';
+import { Readable } from 'node:stream';
 import sharp from 'sharp';
 import { sharpBmp } from '@misskey-dev/sharp-read-bmp';
+import type { Config, ResolvedConfig } from './config.ts';
+import { resolveConfig } from './config.ts';
 import { StatusError } from './status-error.ts';
-import { defaultDownloadConfig, downloadUrl } from './download.ts';
-import type { DownloadConfig } from './download.ts';
-import { getAgents } from './http.ts';
-import { create as createContentDisposition } from 'content-disposition';
+import { createTemp } from './create-temp.ts';
+import { downloadUrl } from './download.ts';
+import { detectType, isMimeImage } from './file-info.ts';
+import { FILE_TYPE_BROWSERSAFE } from './const.ts';
+import { baseHeaders, contentDisposition, correctFilename, Semaphore } from './web.ts';
+import { convertSharpToWebp, convertToWebp, finalize, webpDefault } from './image-processor.ts';
 
-const _filename = fileURLToPath(import.meta.url);
-const _dirname = dirname(_filename);
+const DUMMY_IMAGE = new URL('../assets/dummy.png', import.meta.url);
 
-const assets = `${_dirname}/../assets/`;
+type Prepared =
+	| { kind: 'buffer'; data: Buffer; ext: string; type: string }
+	| { kind: 'file'; path: string; ext: string | null; type: string };
 
-export type MediaProxyOptions = {
-    ['Access-Control-Allow-Origin']?: string;
-    ['Access-Control-Allow-Headers']?: string;
-    ['Content-Security-Policy']?: string;
-    userAgent?: string;
-    allowedPrivateNetworks?: string[];
-    maxSize?: number;
-} & ({
-    proxy?: string;
-} | {
-    httpAgent: http.Agent;
-    httpsAgent: https.Agent;
-});
-
-let config: DownloadConfig = defaultDownloadConfig;
-
-export function setMediaProxyConfig(setting?: MediaProxyOptions | null) {
-    const proxy = process.env.HTTP_PROXY ?? process.env.http_proxy;
-
-    if (!setting) {
-        config = {
-            ...defaultDownloadConfig,
-            ...(proxy ? getAgents(proxy) : {}),
-            proxy: !!proxy,
-        };
-        console.log(config);
-        return;
-    }
-
-    config = {
-        userAgent: setting.userAgent ?? defaultDownloadConfig.userAgent,
-        allowedPrivateNetworks: setting.allowedPrivateNetworks ?? defaultDownloadConfig.allowedPrivateNetworks,
-        maxSize: setting.maxSize ?? defaultDownloadConfig.maxSize,
-        ...('proxy' in setting ?
-            { ...getAgents(setting.proxy), proxy: !!setting.proxy } :
-            'httpAgent' in setting ? {
-                httpAgent: setting.httpAgent,
-                httpsAgent: setting.httpsAgent,
-                proxy: true,
-            } :
-            { ...getAgents(proxy), proxy: !!proxy }),
-    };
-
-    console.log(config);
+export function createHandler(config?: Config | null): (request: Request) => Promise<Response> {
+	const resolved = resolveConfig(config);
+	const conversions = new Semaphore(resolved.maxConcurrentConversions);
+	return (request: Request) => handleRequest(request, resolved, conversions);
 }
 
-export default function (fastify: FastifyInstance, options: MediaProxyOptions | null | undefined, done: (err?: Error) => void) {
-    setMediaProxyConfig(options);
+async function handleRequest(request: Request, config: ResolvedConfig, conversions: Semaphore): Promise<Response> {
+	if (request.method === 'OPTIONS') {
+		return new Response(null, { status: 204, headers: baseHeaders(config) });
+	}
+	if (request.method !== 'GET' && request.method !== 'HEAD') {
+		return new Response(null, { status: 405, headers: baseHeaders(config) });
+	}
 
-    const corsOrigin = options!['Access-Control-Allow-Origin'] ?? '*';
-    const corsHeader = options!['Access-Control-Allow-Headers'] ?? '*';
-    const csp = options!['Content-Security-Policy'] ?? `default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'`;
-
-    fastify.addHook('onRequest', (request, reply, done) => {
-        reply.header('Access-Control-Allow-Origin', corsOrigin);
-        reply.header('Access-Control-Allow-Headers', corsHeader);
-        reply.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
-        reply.header('Content-Security-Policy', csp);
-        done();
-    });
-
-    fastify.register(fastifyStatic, {
-        root: _dirname,
-        serve: false,
-    });
-
-    fastify.get<{
-        Params: { url: string; };
-        Querystring: { url?: string; };
-    }>('/:url*', async (request, reply) => {
-        return await proxyHandler(request, reply)
-            .catch(err => errorHandler(request, reply, err));
-    });
-
-    done();
+	const url = new URL(request.url);
+	try {
+		return await proxyHandler(request, url, config, conversions);
+	} catch (error) {
+		return errorHandler(url, config, error);
+	}
 }
 
-function errorHandler(request: FastifyRequest<{ Params?: { [x: string]: any }; Querystring?: { [x: string]: any }; }>, reply: FastifyReply, err?: any) {
-    console.log(`${err}`);
-
-    reply.header('Cache-Control', 'max-age=300');
-
-    if (request.query && 'fallback' in request.query) {
-        return reply.sendFile('/dummy.png', assets);
-    }
-
-    if (err instanceof StatusError && (err.statusCode === 302 || err.isClientError)) {
-        reply.code(err.statusCode);
-        return;
-    }
-
-    reply.code(500);
-    return;
+function resolveTarget(url: URL): string | null {
+	const queryUrl = url.searchParams.get('url');
+	if (queryUrl) return queryUrl;
+	if (url.pathname && url.pathname !== '/' && url.pathname !== '/proxy') {
+		return 'https://' + url.pathname.slice(1);
+	}
+	return null;
 }
 
-async function proxyHandler(request: FastifyRequest<{ Params: { url: string; }; Querystring: { url?: string; }; }>, reply: FastifyReply) {
-    const url = 'url' in request.query ? request.query.url : (request.params.url && 'https://' + request.params.url);
+async function proxyHandler(request: Request, url: URL, config: ResolvedConfig, conversions: Semaphore): Promise<Response> {
+	const params = url.searchParams;
+	const target = resolveTarget(url);
+	if (!target) {
+		return new Response(null, { status: 400, headers: baseHeaders(config) });
+	}
 
-    if (!url || typeof url !== 'string') {
-        reply.code(400);
-        return;
-    }
+	const [tmpPath, cleanup] = await createTemp();
+	try {
+		const { filename } = await downloadUrl(target, tmpPath, config.download);
+		const { mime, ext } = await detectType(tmpPath);
 
-    // Create temp file
-    const file = await downloadAndDetectTypeFromUrl(url);
+		const wantsImage = params.has('emoji') || params.has('avatar') || params.has('static')
+			|| params.has('preview') || params.has('badge');
 
-    try {
-        const isConvertibleImage = isMimeImage(file.mime, 'sharp-convertible-image');
-        const isAnimationConvertibleImage = isMimeImage(file.mime, 'sharp-animation-convertible-image');
+		if (wantsImage && !isMimeImage(mime, 'sharp-convertible-image')) {
+			throw new StatusError('Unexpected mime', 404);
+		}
 
-        if (
-            'emoji' in request.query ||
-            'avatar' in request.query ||
-            'static' in request.query ||
-            'preview' in request.query ||
-            'badge' in request.query
-        ) {
-            if (!isConvertibleImage) {
-                // 画像でないなら404でお茶を濁す
-                throw new StatusError('Unexpected mime', 404);
-            }
-        }
+		const passthrough: Prepared = { kind: 'file', path: tmpPath, ext, type: mime };
+		let prepared: Prepared | null = null;
 
-        let image: IImageStreamable | null = null;
+		if (params.has('emoji') || params.has('avatar')) {
+			if (!isMimeImage(mime, 'sharp-animation-convertible-image') && !params.has('static')) {
+				// APNG (and other formats sharp will not re-encode) is passed
+				// through untouched, matching upstream behaviour.
+				prepared = passthrough;
+			} else {
+				const maxHeight = params.has('emoji') ? 128 : 320;
+				prepared = await withPermit(conversions, async () => {
+					const image = (await sharpBmp(tmpPath, mime, { animated: !params.has('static') }))
+						.resize({ height: maxHeight, withoutEnlargement: true })
+						.webp(webpDefault);
+					return { kind: 'buffer', ...(await finalize(image)) };
+				});
+			}
+		} else if (params.has('static')) {
+			prepared = await withPermit(conversions, async () => ({
+				kind: 'buffer',
+				...(await convertSharpToWebp(await sharpBmp(tmpPath, mime), 498, 422)),
+			}));
+		} else if (params.has('preview')) {
+			prepared = await withPermit(conversions, async () => ({
+				kind: 'buffer',
+				...(await convertSharpToWebp(await sharpBmp(tmpPath, mime), 200, 200)),
+			}));
+		} else if (params.has('badge')) {
+			prepared = await withPermit(conversions, async () => {
+				const mask = (await sharpBmp(tmpPath, mime))
+					.resize(96, 96, { fit: 'contain', position: 'centre', withoutEnlargement: false })
+					.greyscale()
+					.normalise()
+					.linear(1.75, -(128 * 1.75) + 128) // 1.75x contrast
+					.flatten({ background: '#000' })
+					.toColorspace('b-w');
 
-        if ('emoji' in request.query || 'avatar' in request.query) {
-            if (!isAnimationConvertibleImage && !('static' in request.query)) {
-                image = {
-                    data: fs.createReadStream(file.path),
-                    ext: file.ext,
-                    type: file.mime,
-                };
-            } else {
-                const data = (await sharpBmp(file.path, file.mime, { animated: !('static' in request.query) }))
-                    .resize({
-                        height: 'emoji' in request.query ? 128 : 320,
-                        withoutEnlargement: true,
-                    })
-                    .webp(webpDefault);
+				const stats = await mask.clone().stats();
+				if (stats.entropy < 0.1) {
+					// Not enough detail to be a useful badge.
+					throw new StatusError('Skip to provide badge', 404);
+				}
 
-                image = {
-                    data,
-                    ext: 'webp',
-                    type: 'image/webp',
-                };
-            }
-        } else if ('static' in request.query) {
-            image = convertSharpToWebpStream(await sharpBmp(file.path, file.mime), 498, 422);
-        } else if ('preview' in request.query) {
-            image = convertSharpToWebpStream(await sharpBmp(file.path, file.mime), 200, 200);
-        } else if ('badge' in request.query) {
-            const mask = (await sharpBmp(file.path, file.mime))
-                .resize(96, 96, {
-                    fit: 'contain',
-                    position: 'centre',
-                    withoutEnlargement: false,
-                })
-                .greyscale()
-                .normalise()
-                .linear(1.75, -(128 * 1.75) + 128) // 1.75x contrast
-                .flatten({ background: '#000' })
-                .toColorspace('b-w');
+				const data = sharp({
+					create: { width: 96, height: 96, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+				})
+					.pipelineColorspace('b-w')
+					.boolean(await mask.png().toBuffer(), 'eor');
 
-            const stats = await mask.clone().stats();
+				return { kind: 'buffer', data: await data.png().toBuffer(), ext: 'png', type: 'image/png' };
+			});
+		} else if (mime === 'image/svg+xml') {
+			// Rasterise SVG so it cannot execute as a document.
+			prepared = await withPermit(conversions, async () => ({
+				kind: 'buffer',
+				...(await convertToWebp(tmpPath, 2048, 2048)),
+			}));
+		} else if (!(mime.startsWith('image/') || FILE_TYPE_BROWSERSAFE.includes(mime))) {
+			throw new StatusError('Rejected type', 403, 'Rejected type');
+		}
 
-            if (stats.entropy < 0.1) {
-                // エントロピーがあまりない場合は404にする
-                throw new StatusError('Skip to provide badge', 404);
-            }
+		prepared ??= passthrough;
 
-            const data = sharp({
-                create: { width: 96, height: 96, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
-            })
-                .pipelineColorspace('b-w')
-                .boolean(await mask.png().toBuffer(), 'eor');
+		const headers = baseHeaders(config);
+		headers.set('Content-Type', prepared.type);
+		headers.set('Cache-Control', 'max-age=31536000, immutable');
+		headers.set('Content-Disposition', contentDisposition(correctFilename(filename, prepared.ext)));
 
-            image = {
-                data: await data.png().toBuffer(),
-                ext: 'png',
-                type: 'image/png',
-            };
-        } else if (file.mime === 'image/svg+xml') {
-            image = convertToWebpStream(file.path, 2048, 2048);
-        } else if (!(file.mime.startsWith('image/') || FILE_TYPE_BROWSERSAFE.includes(file.mime))) {
-            throw new StatusError('Rejected type', 403, 'Rejected type');
-        }
+		if (prepared.kind === 'buffer') {
+			cleanup();
+			return new Response(prepared.data, { headers });
+		}
 
-        if (!image) {
-            image = {
-                data: fs.createReadStream(file.path),
-                ext: file.ext,
-                type: file.mime,
-            };
-        }
-
-        if ('cleanup' in file) {
-            if ('pipe' in image.data && typeof image.data.pipe === 'function') {
-                // image.dataがstreamなら、stream終了後にcleanup
-                const cleanup = () => {
-                    file.cleanup();
-                    image = null;
-                }
-                image.data.on('end', cleanup);
-                image.data.on('close', cleanup);
-            } else {
-                // image.dataがstreamでないなら直ちにcleanup
-                file.cleanup();
-            }
-        }
-
-        reply.header('Content-Type', image.type);
-        reply.header('Cache-Control', 'max-age=31536000, immutable');
-        reply.header('Content-Disposition',
-            contentDisposition(
-                'inline',
-                correctFilename(file.filename, image.ext)
-            )
-        );
-        return reply.send(image.data);
-    } catch (e) {
-        if ('cleanup' in file) file.cleanup();
-        throw e;
-    }
+		return fileResponse(request, prepared.path, cleanup, headers);
+	} catch (error) {
+		cleanup();
+		throw error;
+	}
 }
 
-async function downloadAndDetectTypeFromUrl(url: string): Promise<
-    { state: 'remote'; mime: string; ext: string | null; path: string; cleanup: () => void; filename: string; }
-> {
-    const [path, cleanup] = await createTemp();
-    try {
-        const { filename } = await downloadUrl(url, path, config);
-
-        const { mime, ext } = await detectType(path);
-
-        return {
-            state: 'remote',
-            mime, ext,
-            path, cleanup,
-            filename: correctFilename(filename, ext),
-        }
-    } catch (e) {
-        cleanup();
-        throw e;
-    }
+async function withPermit<T>(semaphore: Semaphore, fn: () => Promise<T>): Promise<T> {
+	const release = await semaphore.acquire();
+	try {
+		return await fn();
+	} finally {
+		release();
+	}
 }
 
-function correctFilename(filename: string, ext: string | null) {
-    const dotExt = ext ? `.${ext}` : '.unknown';
-    if (filename.endsWith(dotExt)) {
-        return filename;
-    }
-    if (ext === 'jpg' && filename.endsWith('.jpeg')) {
-        return filename;
-    }
-    if (ext === 'tif' && filename.endsWith('.tiff')) {
-        return filename;
-    }
-    return `${filename}${dotExt}`;
+function fileResponse(request: Request, path: string, cleanup: () => void, headers: Headers): Response {
+	let finished = false;
+	const finish = () => {
+		if (finished) return;
+		finished = true;
+		cleanup();
+	};
+
+	const stream = fs.createReadStream(path);
+	stream.on('close', finish);
+	stream.on('error', finish);
+	request.signal.addEventListener('abort', () => stream.destroy(), { once: true });
+
+	return new Response(Readable.toWeb(stream) as ReadableStream, { headers });
 }
 
-function contentDisposition(type: 'inline' | 'attachment', filename: string): string {
-	const fallback = filename.replace(/[^\w.-]/g, '_');
-	return createContentDisposition(filename, { type, fallback });
+function errorHandler(url: URL, config: ResolvedConfig, error: unknown): Response {
+	console.log(error instanceof Error ? error.stack ?? error.message : String(error));
+
+	const headers = baseHeaders(config);
+	headers.set('Cache-Control', 'max-age=300');
+
+	if (url.searchParams.has('fallback')) {
+		return new Response(Bun.file(DUMMY_IMAGE), { headers, status: 200 });
+	}
+
+	if (error instanceof StatusError && error.isClientError) {
+		return new Response(null, { status: error.statusCode, headers });
+	}
+
+	return new Response(null, { status: 500, headers });
 }

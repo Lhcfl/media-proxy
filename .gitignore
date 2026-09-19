@@ -63,3 +63,14 @@ config.js
 result
 result-*
 .direnv/
+
+# Runtime config
+config.toml
+config.yaml
+config.yml
+config.json
+config.jsonc
+config.json5
+
+# Agent task logs
+.pi/

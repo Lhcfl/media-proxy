@@ -1,46 +1,47 @@
 import sharp, { type Sharp, type WebpOptions } from 'sharp';
-import { Readable } from 'node:stream';
 
 export type IImage = {
-    data: Buffer;
-    ext: string | null;
-    type: string;
+	data: Buffer;
+	ext: string;
+	type: string;
 };
 
-export type IImageStream = {
-    data: Readable;
-    ext: string | null;
-    type: string;
-};
-
-export type IImageStreamable = IImage | IImageStream;
-
+// Matches the upstream encoder tuning: sharper and smaller than plain quality.
 export const webpDefault: WebpOptions = {
-    quality: 77,
-    alphaQuality: 95,
-    lossless: false,
-    nearLossless: false,
-    smartSubsample: true,
-    mixed: true,
-    effort: 2,
+	quality: 77,
+	alphaQuality: 95,
+	lossless: false,
+	nearLossless: false,
+	smartSubsample: true,
+	mixed: true,
+	effort: 2,
 };
 
-export function convertToWebpStream(path: string, width: number, height: number, options: WebpOptions = webpDefault): IImageStream {
-    return convertSharpToWebpStream(sharp(path), width, height, options);
+/** Encodes a sharp pipeline that already selected webp as the output. */
+export async function finalize(image: Sharp): Promise<IImage> {
+	return {
+		data: await image.toBuffer(),
+		ext: 'webp',
+		type: 'image/webp',
+	};
 }
 
-export function convertSharpToWebpStream(sharp: Sharp, width: number, height: number, options: WebpOptions = webpDefault): IImageStream {
-    const data = sharp
-        .resize(width, height, {
-            fit: 'inside',
-            withoutEnlargement: true,
-        })
-        .rotate()
-        .webp(options)
+/** Fits the input inside `width`×`height` (aspect preserved, no upscaling). */
+export async function convertToWebp(path: string, width: number, height: number, options: WebpOptions = webpDefault): Promise<IImage> {
+	return finalize(
+		sharp(path)
+			.resize(width, height, { fit: 'inside', withoutEnlargement: true })
+			.rotate()
+			.webp(options),
+	);
+}
 
-    return {
-        data,
-        ext: 'webp',
-        type: 'image/webp',
-    };
+/** Same as convertToWebp but for an already-constructed sharp pipeline. */
+export async function convertSharpToWebp(image: Sharp, width: number, height: number, options: WebpOptions = webpDefault): Promise<IImage> {
+	return finalize(
+		image
+			.resize(width, height, { fit: 'inside', withoutEnlargement: true })
+			.rotate()
+			.webp(options),
+	);
 }

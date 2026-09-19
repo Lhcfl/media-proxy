@@ -8,11 +8,10 @@
 let
   cfg = config.services.misskey-media-proxy;
 
-  # start.js reads the media-proxy options from config.js. Generate it from the
-  # `settings` option and point the service at it.
-  configFile = pkgs.writeText "misskey-media-proxy-config.js" ''
-    export default ${builtins.toJSON cfg.settings};
-  '';
+  # start.ts loads its configuration from MISSKEY_MEDIA_PROXY_CONFIG. Bun parses
+  # TOML natively, so the module can generate a plain data file instead of
+  # emitting JavaScript.
+  configFile = (pkgs.formats.toml { }).generate "misskey-media-proxy-config.toml" cfg.settings;
 in
 {
   options.services.misskey-media-proxy = {
@@ -39,6 +38,16 @@ in
       '';
     };
 
+    memoryMax = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "1G";
+      description = ''
+        Optional systemd `MemoryMax=` for the service. Image conversion can
+        spike while decoding, so this acts as a backstop.
+      '';
+    };
+
     settings = lib.mkOption {
       type = lib.types.attrsOf lib.types.anything;
       default = {
@@ -49,10 +58,11 @@ in
         "Access-Control-Allow-Headers" = "*";
         "Content-Security-Policy" =
           "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'";
+        maxConcurrentConversions = 4;
       };
       description = ''
-        Contents of `config.js` as a Nix attribute set. See the upstream
-        README for the supported options.
+        Contents of the generated TOML config (see `config.example.toml` in the
+        repository). Values must be representable as TOML.
       '';
     };
   };
@@ -67,11 +77,6 @@ in
       environment = {
         PORT = toString cfg.port;
         MISSKEY_MEDIA_PROXY_CONFIG = configFile;
-        # Enables the private-network (SSRF) check during downloads and makes
-        # createTemp() actually delete its temporary files. Without this the
-        # cleanup callback becomes a no-op and every downloaded file leaks into
-        # the service's private tmpfs (PrivateTmp = true), i.e. into RAM.
-        NODE_ENV = "production";
       };
 
       serviceConfig = {
@@ -82,6 +87,8 @@ in
 
         Restart = "on-failure";
         RestartSec = 5;
+
+        MemoryMax = lib.mkIf (cfg.memoryMax != null) cfg.memoryMax;
 
         NoNewPrivileges = true;
         PrivateTmp = true;

@@ -1,8 +1,8 @@
 {
 	"compilerOptions": {
 		"allowJs": true,
-		// Node.js runs the TypeScript sources directly (type stripping), so
-		// imports use .ts extensions and tsc only type-checks.
+		// Bun runs the TypeScript sources directly (type stripping), so imports
+		// use .ts extensions and tsc only type-checks.
 		"noEmit": true,
 		"allowImportingTsExtensions": true,
 		"verbatimModuleSyntax": true,
@@ -23,8 +23,9 @@
 		"skipLibCheck": true,
 		"resolveJsonModule": true,
 		"isolatedModules": true,
-		"rootDir": "./src",
+		"rootDir": ".",
 		"types": [
+			"bun",
 			"node"
 		],
 		"typeRoots": [
@@ -37,6 +38,7 @@
 	},
 	"compileOnSave": false,
 	"include": [
-		"./src/**/*.ts"
+		"./src/**/*.ts",
+		"./start.ts"
 	],
 }

@@ -1,0 +1,25 @@
+# Misskey media proxy configuration.
+# Point MISSKEY_MEDIA_PROXY_CONFIG at this file, or drop it in the working
+# directory as config.toml. YAML/JSON/JS files are accepted too.
+# NixOS can generate it with pkgs.formats.toml (see README).
+
+userAgent = "MisskeyMediaProxy"
+
+# Private network ranges that may be reached (empty = block all).
+allowedPrivateNetworks = []
+
+# Maximum download size in bytes.
+maxSize = 262144000
+
+# CORS
+"Access-Control-Allow-Origin" = "*"
+"Access-Control-Allow-Headers" = "*"
+
+# CSP
+"Content-Security-Policy" = "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'"
+
+# Forward proxy (HTTP_PROXY / HTTPS_PROXY are also honoured).
+# proxy = "http://127.0.0.1:3128"
+
+# Cap on simultaneous image conversions (default 4).
+maxConcurrentConversions = 4

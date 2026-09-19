@@ -6,122 +6,151 @@ import * as https from 'node:https';
 import ipaddr from 'ipaddr.js';
 import got, * as Got from 'got';
 import { StatusError } from './status-error.ts';
-import { getAgents } from './http.ts';
-import { parse } from 'content-disposition';
+import { getAgents } from './agents.ts';
+import { parseContentDispositionFilename } from './web.ts';
 
 const pipeline = util.promisify(stream.pipeline);
 
 export type DownloadConfig = {
-    [x: string]: any;
-    userAgent: string;
-    allowedPrivateNetworks: string[];
-    maxSize: number;
-    httpAgent: http.Agent,
-    httpsAgent: https.Agent,
-    proxy?: boolean;
+	userAgent: string;
+	allowedPrivateNetworks: string[];
+	maxSize: number;
+	httpAgent: http.Agent;
+	httpsAgent: https.Agent;
+	/** True when requests are sent through a forward proxy. */
+	proxy?: boolean;
+};
+
+export const defaultDownloadConfig: DownloadConfig = {
+	userAgent: 'MisskeyMediaProxy/0.0.0',
+	allowedPrivateNetworks: [],
+	maxSize: 262144000,
+	proxy: false,
+	...getAgents(),
+};
+
+/** True when the address must not be reached through the proxy. */
+function isBlockedAddress(ip: string, allowedPrivateNetworks: string[]): boolean {
+	let parsed: ipaddr.IPv4 | ipaddr.IPv6;
+	try {
+		parsed = ipaddr.parse(ip);
+	} catch {
+		return true;
+	}
+
+	for (const network of allowedPrivateNetworks ?? []) {
+		try {
+			if (parsed.match(ipaddr.parseCIDR(network))) return false;
+		} catch {
+			// ignore malformed allowlist entries
+		}
+	}
+
+	return parsed.range() !== 'unicast';
 }
 
-export const defaultDownloadConfig = {
-    userAgent: `MisskeyMediaProxy/0.0.0`,
-    allowedPrivateNetworks: [],
-    maxSize: 262144000,
-    proxy: false,
-    ...getAgents()
+/**
+ * With a forward proxy, got connects to the proxy, so res.ip is the proxy's
+ * address and cannot vouch for the target. Resolve the target locally and check
+ * every answer instead. This leaves a small DNS-rebinding window, unlike the
+ * direct path which checks the connected socket.
+ */
+async function assertPublicHost(hostname: string, allowedPrivateNetworks: string[]): Promise<void> {
+	let host = hostname;
+	if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+
+	const check = (ip: string) => {
+		if (isBlockedAddress(ip, allowedPrivateNetworks)) {
+			throw new StatusError(`Blocked address: ${ip}`, 403, 'Blocked address');
+		}
+	};
+
+	if (ipaddr.isValid(host)) {
+		check(host);
+		return;
+	}
+
+	let addresses: Array<{ address: string }>;
+	try {
+		addresses = await Bun.dns.lookup(host);
+	} catch {
+		// Let got surface the real error for an unresolvable host.
+		return;
+	}
+	for (const { address } of addresses) check(address);
 }
 
-export async function downloadUrl(url: string, path: string, settings:DownloadConfig = defaultDownloadConfig): Promise<{
-    filename: string;
-}> {
-    if (process.env.NODE_ENV !== 'production') console.log(`Downloading ${url} to ${path} ...`);
+export async function downloadUrl(url: string, path: string, settings: DownloadConfig = defaultDownloadConfig): Promise<{ filename: string }> {
+	const urlObj = new URL(url);
+	let filename = urlObj.pathname.split('/').pop() || 'unknown';
 
-    const timeout = 30 * 1000;
-    const operationTimeout = 60 * 1000;
+	if (settings.proxy) {
+		await assertPublicHost(urlObj.hostname, settings.allowedPrivateNetworks);
+	}
 
-    const urlObj = new URL(url);
-    let filename = urlObj.pathname.split('/').pop() ?? 'unknown';
+	const timeout = 30 * 1000;
+	const operationTimeout = 60 * 1000;
 
-    const req = got.stream(url, {
-        headers: {
-            'User-Agent': settings.userAgent,
-        },
-        timeout: {
-            lookup: timeout,
-            connect: timeout,
-            secureConnect: timeout,
-            socket: timeout,	// read timeout
-            response: timeout,
-            send: timeout,
-            request: operationTimeout,	// whole operation timeout
-        },
-        agent: {
-            http: settings.httpAgent,
-            https: settings.httpsAgent,
-        },
-        http2: false,
-        retry: {
-            limit: 0,
-        },
-        enableUnixSockets: false,
-    }).on('response', (res: Got.Response) => {
-        if ((process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'test') && !settings.proxy && res.ip) {
-            if (isPrivateIp(res.ip, settings.allowedPrivateNetworks)) {
-                console.log(`Blocked address: ${res.ip}`);
-                req.destroy();
-            }
-        }
+	const req = got.stream(url, {
+		headers: {
+			'User-Agent': settings.userAgent,
+		},
+		timeout: {
+			lookup: timeout,
+			connect: timeout,
+			secureConnect: timeout,
+			socket: timeout, // read timeout
+			response: timeout,
+			send: timeout,
+			request: operationTimeout, // whole operation timeout
+		},
+		agent: {
+			http: settings.httpAgent,
+			https: settings.httpsAgent,
+		},
+		http2: false,
+		retry: {
+			limit: 0,
+		},
+		enableUnixSockets: false,
+	}).on('response', (res: Got.Response) => {
+		if (!settings.proxy && res.ip) {
+			if (isBlockedAddress(res.ip, settings.allowedPrivateNetworks)) {
+				console.log(`Blocked address: ${res.ip}`);
+				req.destroy();
+			}
+		}
 
-        const contentLength = res.headers['content-length'];
-        if (contentLength != null) {
-            const size = Number(contentLength);
-            if (size > settings.maxSize) {
-                console.log(`maxSize exceeded (${size} > ${settings.maxSize}) on response`);
-                req.destroy();
-            }
-        }
+		const contentLength = res.headers['content-length'];
+		if (contentLength != null) {
+			const size = Number(contentLength);
+			if (size > settings.maxSize) {
+				console.log(`maxSize exceeded (${size} > ${settings.maxSize}) on response`);
+				req.destroy();
+			}
+		}
 
-        const contentDisposition = res.headers['content-disposition'];
-        if (contentDisposition != null) {
-            try {
-                const parsed = parse(contentDisposition);
-                if (parsed.parameters.filename) {
-                    filename = parsed.parameters.filename;
-                }
-            } catch (e) {
-                console.log(`Failed to parse content-disposition: ${contentDisposition}\n${e}`);
-            }
-        }
-    }).on('downloadProgress', (progress: Got.Progress) => {
-        if (progress.transferred > settings.maxSize) {
-            console.log(`maxSize exceeded (${progress.transferred} > ${settings.maxSize}) on downloadProgress`);
-            req.destroy();
-        }
-    });
+		const fromHeader = parseContentDispositionFilename(res.headers['content-disposition'] ?? null);
+		if (fromHeader) filename = fromHeader;
+	}).on('downloadProgress', (progress: Got.Progress) => {
+		if (progress.transferred > settings.maxSize) {
+			console.log(`maxSize exceeded (${progress.transferred} > ${settings.maxSize}) on downloadProgress`);
+			req.destroy();
+		}
+	});
 
-    try {
-        await pipeline(req, fs.createWriteStream(path));
-    } catch (e) {
-        if (e instanceof Got.HTTPError) {
-            throw new StatusError(`${e.response.statusCode} ${e.response.statusMessage}`, e.response.statusCode, e.response.statusMessage);
-        } else {
-            throw e;
-        }
-    }
+	try {
+		await pipeline(req, fs.createWriteStream(path));
+	} catch (error) {
+		if (error instanceof Got.HTTPError) {
+			throw new StatusError(
+				`${error.response.statusCode} ${error.response.statusMessage}`,
+				error.response.statusCode,
+				error.response.statusMessage,
+			);
+		}
+		throw error;
+	}
 
-    if (process.env.NODE_ENV !== 'production') console.log(`Download finished: ${url}`);
-
-    return {
-        filename,
-    }
-}
-
-function isPrivateIp(ip: string, allowedPrivateNetworks: string[]): boolean {
-    const parsedIp = ipaddr.parse(ip);
-
-    for (const net of allowedPrivateNetworks ?? []) {
-        if (parsedIp.match(ipaddr.parseCIDR(net))) {
-            return false;
-        }
-    }
-
-    return parsedIp.range() !== 'unicast';
+	return { filename };
 }

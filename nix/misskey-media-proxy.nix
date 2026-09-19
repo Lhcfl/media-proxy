@@ -6,23 +6,65 @@
       lib = pkgs.lib;
       version = (lib.importJSON ../package.json).version;
 
-      nodejs = pkgs.nodejs_26;
-      # node-gyp wrapper that uses the local Node.js headers (no download).
+      bun = pkgs.bun;
+      # Node.js + node-gyp are only used to compile sharp's native addon
+      # against the libvips from nixpkgs. Anything recent works (sharp uses the
+      # stable Node-API), so use the default Node.js which is in the binary
+      # cache. The server itself runs on Bun.
+      nodejs = pkgs.nodejs;
       nodeGyp = pkgs.node-gyp.override { inherit nodejs; };
-      pnpm = pkgs.pnpm_10;
 
-      # Everything the TypeScript build and pnpm install need. Keeping this
-      # explicit means the flake files themselves are not part of src.
+      # node_modules, installed once as a fixed-output derivation so the main
+      # build is offline. `copyfile` avoids symlinks into Bun's cache, which a
+      # fixed-output derivation may not reference.
+      bunDeps = pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
+        pname = "misskey-media-proxy-node-modules";
+        inherit version;
+        src = lib.fileset.toSource {
+          root = ../.;
+          fileset = lib.fileset.unions [
+            ../package.json
+            ../bun.lock
+          ];
+        };
+
+        nativeBuildInputs = [ bun ];
+        impureEnvVars = [
+          "http_proxy"
+          "https_proxy"
+          "HTTP_PROXY"
+          "HTTPS_PROXY"
+          "no_proxy"
+          "NO_PROXY"
+        ];
+
+        outputHashMode = "recursive";
+        outputHashAlgo = "sha256";
+        # Reset to lib.fakeHash, build, and copy the hash from the error.
+        outputHash = "sha256-vLVs612vjXVRcYqnIjBjR+uDDmIdKyWmNge6NJ45dP0=";
+
+        buildCommand = ''
+          export HOME=$TMPDIR
+          cp -r --no-preserve=mode $src/. .
+          # --omit=optional skips sharp's prebuilt @img/* binaries; the add-on
+          # is built from source below.
+          bun install --frozen-lockfile --ignore-scripts --no-progress \
+            --backend=copyfile --omit=optional
+          mkdir -p $out
+          cp -r node_modules $out/node_modules
+        '';
+      });
+
+      # Everything the server needs at runtime, plus the sources.
       src = lib.fileset.toSource {
         root = ../.;
         fileset = lib.fileset.unions [
           ../src
           ../assets
           ../package.json
-          ../pnpm-lock.yaml
+          ../bun.lock
           ../tsconfig.json
-          ../server.js
-          ../start.js
+          ../start.ts
         ];
       };
 
@@ -33,28 +75,9 @@
         __structuredAttrs = true;
         strictDeps = true;
 
-        pnpmDeps = pkgs.fetchPnpmDeps {
-          inherit (finalAttrs)
-            pname
-            version
-            src
-            pnpmInstallFlags
-            ;
-          inherit pnpm;
-          fetcherVersion = 4;
-          # Set to lib.fakeHash, build, and copy the correct hash from the
-          # error log whenever pnpm-lock.yaml changes.
-          hash = "sha256-oZSTaawOdM86ee0SfgGocrM7BKZ86G58wTqn5txoTl8=";
-        };
-
-        # sharp ships prebuilt binaries as optionalDependencies, but the
-        # add-on is built from source against the libvips from nixpkgs.
-        pnpmInstallFlags = [ "--no-optional" ];
-
         nativeBuildInputs = [
+          bun
           nodejs
-          pnpm
-          pkgs.pnpmConfigHook
           pkgs.pkg-config
           pkgs.python3
           nodeGyp
@@ -63,21 +86,24 @@
 
         buildInputs = [ pkgs.vips ];
 
+        configurePhase = ''
+          cp -r ${bunDeps}/node_modules .
+          # node_modules comes from a read-only store path; make it writable so
+          # node-gyp can create sharp/src/build.
+          chmod -R u+w node_modules
+        '';
+
         preBuild = ''
-          # pnpmConfigHook installs with --ignore-scripts, and sharp has no
-          # install script anyway. Build the native add-on ourselves so it
-          # links against the libvips provided by Nix.
+          # sharp has no install script, so build the native add-on ourselves
+          # against the libvips provided by Nix.
           sharpDir=$(readlink -f node_modules/sharp)
           ( cd "$sharpDir" && SHARP_FORCE_GLOBAL_LIBVIPS=1 node-gyp rebuild --directory=src )
         '';
 
         buildPhase = ''
           runHook preBuild
-          # Drop devDependencies. optional=false keeps prune from trying to
-          # fetch the @img/sharp-* prebuilts (there is no network in the sandbox).
-          npm_config_optional=false pnpm prune --prod
-          # pnpm with optional=false leaves dangling symlinks for the skipped
-          # @img/sharp-* prebuilts; drop them so the fixup check passes.
+          # Drop the dev-only type packages now that sharp is built.
+          rm -rf node_modules/@types node_modules/typescript
           find node_modules -xtype l -delete
           runHook postBuild
         '';
@@ -86,13 +112,13 @@
           runHook preInstall
 
           mkdir -p $out/lib/misskey-media-proxy
-          cp -r src start.js server.js package.json node_modules assets \
+          cp -r src start.ts package.json node_modules assets \
             $out/lib/misskey-media-proxy/
 
           mkdir -p $out/bin
-          makeWrapper ${lib.getExe nodejs} $out/bin/misskey-media-proxy \
-            --add-flags "$out/lib/misskey-media-proxy/start.js"
-
+          makeWrapper ${lib.getExe bun} $out/bin/misskey-media-proxy \
+            --add-flags "$out/lib/misskey-media-proxy/start.ts" \
+            --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath [ pkgs.vips pkgs.stdenv.cc.cc.lib ]}"
           runHook postInstall
         '';
 
