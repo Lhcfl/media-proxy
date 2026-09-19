@@ -3,7 +3,7 @@ import { resolveConfig } from './config.ts';
 import { StatusError } from './status-error.ts';
 import { createTemp } from './create-temp.ts';
 import { downloadUrl } from './download.ts';
-import { detectType, isMimeImage } from './file-info.ts';
+import { detectType } from './file-info.ts';
 import { baseHeaders, contentDisposition, correctFilename, Semaphore } from './http.ts';
 import { convertToBadge, convertToWebp, convertToWebpByHeight } from './image-processor.ts';
 import { FILE_TYPE_BROWSERSAFE } from './const.ts';
@@ -59,8 +59,15 @@ async function proxyHandler(request: Request, url: URL, config: ResolvedConfig, 
 	try {
 		const { filename } = await downloadUrl(target, temp.path, config);
 		const detected = await detectType(temp.path);
+		const passthrough: Prepared = { kind: 'file', path: temp.path, ext: detected.ext, type: detected.mime };
 
-		if (wantsImage && !isMimeImage(detected.mime, 'sharp-convertible-image')) {
+		// Serving the original SVG would reintroduce the XSS the format is
+		// excluded for, and there is no librsvg to rasterise it.
+		if (detected.mime === 'image/svg+xml') {
+			throw new StatusError('SVG conversion is not supported', 415, 'Unsupported Media Type');
+		}
+
+		if (wantsImage && !detected.mime.startsWith('image/')) {
 			throw new StatusError('Unexpected mime', 404);
 		}
 
@@ -68,29 +75,27 @@ async function proxyHandler(request: Request, url: URL, config: ResolvedConfig, 
 
 		if (params.has('emoji') || params.has('avatar')) {
 			if (detected.animated && !params.has('static')) {
-				// APNG / animated WebP cannot be re-encoded by Bun.Image, so hand
-				// the original bytes through instead of dropping the animation.
-				prepared = { kind: 'file', path: temp.path, ext: detected.ext, type: detected.mime };
+				// Bun.Image only decodes the first frame, so converting would silently
+				// drop the animation. Hand the original bytes through instead.
+				prepared = passthrough;
 			} else {
 				const maxHeight = params.has('emoji') ? 128 : 320;
-				prepared = { kind: 'buffer', ...(await convert(conversions, () => convertToWebpByHeight(temp.path, maxHeight))) };
+				prepared = await convertOrPassthrough(conversions, passthrough, () => convertToWebpByHeight(temp.path, maxHeight));
 			}
 		} else if (params.has('static')) {
-			prepared = { kind: 'buffer', ...(await convert(conversions, () => convertToWebp(temp.path, 498, 422))) };
+			prepared = await convertOrPassthrough(conversions, passthrough, () => convertToWebp(temp.path, 498, 422));
 		} else if (params.has('preview')) {
-			prepared = { kind: 'buffer', ...(await convert(conversions, () => convertToWebp(temp.path, 200, 200))) };
+			prepared = detected.animated
+				? passthrough
+				: await convertOrPassthrough(conversions, passthrough, () => convertToWebp(temp.path, 200, 200));
 		} else if (params.has('badge')) {
-			prepared = { kind: 'buffer', ...(await convert(conversions, () => convertToBadge(temp.path))) };
-		} else if (detected.mime === 'image/svg+xml') {
-			// The original rasterised SVG with librsvg; Bun.Image cannot decode it.
-			// Refuse rather than serve active SVG content.
-			throw new StatusError('SVG conversion is not supported', 415, 'Unsupported Media Type');
+			prepared = await convertOrPassthrough(conversions, passthrough, () => convertToBadge(temp.path));
 		} else if (!(detected.mime.startsWith('image/') || FILE_TYPE_BROWSERSAFE.includes(detected.mime))) {
 			throw new StatusError('Rejected type', 403, 'Rejected type');
 		}
 
-		// No conversion parameter (or an animated passthrough): replay the file as-is.
-		prepared ??= { kind: 'file', path: temp.path, ext: detected.ext, type: detected.mime };
+		// No conversion parameter: replay the file as-is.
+		prepared ??= passthrough;
 
 		const headers = baseHeaders(config);
 		headers.set('Content-Type', prepared.type);
@@ -109,10 +114,20 @@ async function proxyHandler(request: Request, url: URL, config: ResolvedConfig, 
 	}
 }
 
-async function convert<T>(semaphore: Semaphore, fn: () => Promise<T>): Promise<T> {
+async function convertOrPassthrough(
+	semaphore: Semaphore,
+	passthrough: Prepared,
+	fn: () => Promise<{ bytes: Uint8Array; ext: string; type: string }>,
+): Promise<Prepared> {
 	const release = await semaphore.acquire();
 	try {
-		return await fn();
+		return { kind: 'buffer', ...(await fn()) };
+	} catch (error) {
+		// A 404 from image-processor means Bun.Image cannot decode or encode this
+		// format. Fall back to the original bytes so TIFF/ICO/AVIF (and any
+		// animation) still reach the client instead of failing the request.
+		if (error instanceof StatusError && error.statusCode === 404) return passthrough;
+		throw error;
 	} finally {
 		release();
 	}

@@ -42,32 +42,3 @@ export const FILE_TYPE_BROWSERSAFE = [
 	'audio/x-flac',
 	'audio/vnd.wave',
 ];
-
-// Types the media proxy is allowed to hand to the image pipeline. Bun.Image
-// covers fewer codecs than sharp+libvips did, so a few entries here are
-// best-effort: the conversion is attempted and a failure becomes a 404.
-export const SHARP_CONVERTIBLE_IMAGE = [
-	'image/jpeg',
-	'image/png',
-	'image/gif',
-	'image/apng',
-	'image/vnd.mozilla.apng',
-	'image/webp',
-	'image/avif',
-	'image/svg+xml',
-	'image/x-icon',
-	'image/bmp',
-];
-
-// Formats whose animation can be re-encoded (in the original: webp/gif).
-// APNG is deliberately absent: it is passed through untouched.
-export const SHARP_ANIMATION_CONVERTIBLE_IMAGE = [
-	'image/jpeg',
-	'image/png',
-	'image/gif',
-	'image/webp',
-	'image/avif',
-	'image/svg+xml',
-	'image/x-icon',
-	'image/bmp',
-];

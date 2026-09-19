@@ -54,14 +54,65 @@ function sniffFtyp(bytes: Uint8Array): DetectedType | null {
 	}
 }
 
+function gifIsAnimated(bytes: Uint8Array): boolean {
+	// Nearly every encoder emits the Netscape looping extension early on.
+	if (containsAscii(bytes, 'NETSCAPE2.0', bytes.length)) return true;
+
+	// Otherwise walk the block structure and look for a second frame. The walk
+	// simply gives up if the head buffer ends before the trailer.
+	if (bytes.length < 13) return false;
+	let p = 13;
+	const packed = bytes[10];
+	if (packed & 0x80) p += 3 * (1 << ((packed & 7) + 1));
+
+	let frames = 0;
+	while (p < bytes.length) {
+		const block = bytes[p++];
+		if (block === 0x3b) break;
+		if (block === 0x21) {
+			p++; // extension label
+			p = skipGifSubBlocks(bytes, p);
+			if (p < 0) return false;
+		} else if (block === 0x2c) {
+			frames++;
+			if (frames > 1) return true;
+			if (p + 9 > bytes.length) return false;
+			const imagePacked = bytes[p + 8];
+			p += 9;
+			if (imagePacked & 0x80) p += 3 * (1 << ((imagePacked & 7) + 1));
+			p++; // LZW minimum code size
+			p = skipGifSubBlocks(bytes, p);
+			if (p < 0) return false;
+		} else {
+			return false;
+		}
+	}
+	return false;
+}
+
+/** Returns the offset just past a GIF sub-block chain, or -1 on truncation. */
+function skipGifSubBlocks(bytes: Uint8Array, start: number): number {
+	let p = start;
+	while (p < bytes.length) {
+		const size = bytes[p++];
+		if (size === 0) return p;
+		p += size;
+		if (p > bytes.length) return -1;
+	}
+	return -1;
+}
+
 function sniff(bytes: Uint8Array): DetectedType | null {
 	if (startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
 		const apng = containsAscii(bytes, 'acTL');
 		return { mime: apng ? 'image/apng' : 'image/png', ext: 'png', animated: apng };
 	}
 	if (startsWith(bytes, [0xff, 0xd8, 0xff])) return { mime: 'image/jpeg', ext: 'jpg', animated: false };
-	// Bun.Image only decodes the first frame, so GIFs are treated as still images.
-	if (asciiAt(bytes, 0, 'GIF87a') || asciiAt(bytes, 0, 'GIF89a')) return { mime: 'image/gif', ext: 'gif', animated: false };
+	// Bun.Image only decodes the first frame, so "mutating" a GIF would silently
+	// drop the animation. Detect it instead and pass the original through.
+	if (asciiAt(bytes, 0, 'GIF87a') || asciiAt(bytes, 0, 'GIF89a')) {
+		return { mime: 'image/gif', ext: 'gif', animated: gifIsAnimated(bytes) };
+	}
 	if (asciiAt(bytes, 0, 'RIFF') && asciiAt(bytes, 8, 'WEBP')) {
 		const animated = containsAscii(bytes, 'ANIM');
 		return { mime: 'image/webp', ext: 'webp', animated };

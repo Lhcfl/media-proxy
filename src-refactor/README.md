@@ -133,17 +133,23 @@ Structural improvements:
 
 Capability differences (consequences of `Bun.Image`):
 
-- **SVG is rejected with `415`.** Bun.Image cannot rasterise SVG and there is no
-  librsvg. The original converted SVG to WebP, so this is a real regression;
-  serving raw SVG would reintroduce the XSS the format is excluded for.
-- **Animated emoji/avatar are not preserved.** APNG and animated WebP are passed
-  through untouched (`static` still needs a decodable frame). Animated GIF is
-  decoded to its first frame, so `emoji`/`avatar` return a static WebP instead of
-  an animated one.
+- **Animation is preserved by passing the original through.** `Bun.Image` only
+  decodes the first frame, so any animated GIF, APNG or animated WebP requested
+  as `emoji`, `avatar` or `preview` is returned untouched (original bytes,
+  original `Content-Type`). `static` still converts to a still WebP when the
+  codec can decode it.
+- **Formats Bun cannot convert fall back to the original bytes.** TIFF, ICO,
+  AVIF/HEIC on Linux etc. return the source file with its real `Content-Type`
+  instead of a `404`, so the client still gets a usable image. Only a
+  non-image mime with a conversion flag is a `404`.
+  This intentionally contradicts `SPECIFICATION.md`, which says `404` for a
+  conversion query on a non-convertible file — keeping the animation/asset is
+  more useful for the proxy.
+- **SVG is still rejected with `415`.** Bun.Image cannot rasterise SVG and there
+  is no librsvg. Unlike the other formats, serving the raw SVG is not an option:
+  it would reintroduce the XSS the format is excluded for.
 - **`badge` is approximate**: a 96×96 greyscale PNG, without sharp's
   normalise/contrast/alpha-mask pipeline or the entropy-based 404.
-- **TIFF, ICO and AVIF cannot be converted on Linux** (missing OS codecs), so
-  conversion flags return `404`. Pass-through of those types still works.
 
 Other:
 
