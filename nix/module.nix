@@ -49,7 +49,7 @@ in
     };
 
     settings = lib.mkOption {
-      type = lib.types.attrsOf lib.types.anything;
+      type = lib.types.toml;
       default = {
         userAgent = "MisskeyMediaProxy";
         allowedPrivateNetworks = [ ];
