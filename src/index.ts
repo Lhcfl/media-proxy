@@ -117,76 +117,77 @@ async function proxyHandler(
 			// through untouched, matching upstream behaviour.
 			prepared = passthrough;
 		} else {
+			using _permit = await conversions.acquire();
 			const maxHeight = params.has("emoji") ? 128 : 320;
-			prepared = await withPermit(conversions, async () => {
-				const image = (await openImage(temp.path, mime, !params.has("static")))
-					.resize({ height: maxHeight, withoutEnlargement: true })
-					.webp(webpDefault);
-				return { kind: "buffer", ...(await finalize(image)) };
-			});
+			const image = (await openImage(temp.path, mime, !params.has("static")))
+				.resize({ height: maxHeight, withoutEnlargement: true })
+				.webp(webpDefault);
+			prepared = { kind: "buffer", ...(await finalize(image)) };
 		}
 	} else if (params.has("static")) {
-		prepared = await withPermit(conversions, async () => ({
+		using _permit = await conversions.acquire();
+		prepared = {
 			kind: "buffer",
 			...(await convertSharpToWebp(
 				await openImage(temp.path, mime, false),
 				498,
 				422,
 			)),
-		}));
+		};
 	} else if (params.has("preview")) {
-		prepared = await withPermit(conversions, async () => ({
+		using _permit = await conversions.acquire();
+		prepared = {
 			kind: "buffer",
 			...(await convertSharpToWebp(
 				await openImage(temp.path, mime, false),
 				200,
 				200,
 			)),
-		}));
+		};
 	} else if (params.has("badge")) {
-		prepared = await withPermit(conversions, async () => {
-			const mask = (await openImage(temp.path, mime, false))
-				.resize(96, 96, {
-					fit: "contain",
-					position: "centre",
-					withoutEnlargement: false,
-				})
-				.greyscale()
-				.normalise()
-				.linear(1.75, -(128 * 1.75) + 128) // 1.75x contrast
-				.flatten({ background: "#000" })
-				.toColorspace("b-w");
-
-			const stats = await mask.clone().stats();
-			if (stats.entropy < 0.1) {
-				// Not enough detail to be a useful badge.
-				throw new StatusError("Skip to provide badge", 404);
-			}
-
-			const data = sharp({
-				create: {
-					width: 96,
-					height: 96,
-					channels: 4,
-					background: { r: 0, g: 0, b: 0, alpha: 0 },
-				},
+		using _permit = await conversions.acquire();
+		const mask = (await openImage(temp.path, mime, false))
+			.resize(96, 96, {
+				fit: "contain",
+				position: "centre",
+				withoutEnlargement: false,
 			})
-				.pipelineColorspace("b-w")
-				.boolean(await mask.png().toBuffer(), "eor");
+			.greyscale()
+			.normalise()
+			.linear(1.75, -(128 * 1.75) + 128) // 1.75x contrast
+			.flatten({ background: "#000" })
+			.toColorspace("b-w");
 
-			return {
-				kind: "buffer",
-				data: await data.png().toBuffer(),
-				ext: "png",
-				type: "image/png",
-			};
-		});
+		const stats = await mask.clone().stats();
+		if (stats.entropy < 0.1) {
+			// Not enough detail to be a useful badge.
+			throw new StatusError("Skip to provide badge", 404);
+		}
+
+		const data = sharp({
+			create: {
+				width: 96,
+				height: 96,
+				channels: 4,
+				background: { r: 0, g: 0, b: 0, alpha: 0 },
+			},
+		})
+			.pipelineColorspace("b-w")
+			.boolean(await mask.png().toBuffer(), "eor");
+
+		prepared = {
+			kind: "buffer",
+			data: await data.png().toBuffer(),
+			ext: "png",
+			type: "image/png",
+		};
 	} else if (mime === "image/svg+xml") {
 		// Rasterise SVG so it cannot execute as a document.
-		prepared = await withPermit(conversions, async () => ({
+		using _permit = await conversions.acquire();
+		prepared = {
 			kind: "buffer",
 			...(await convertToWebp(temp.path, 2048, 2048)),
-		}));
+		};
 	} else if (
 		!(mime.startsWith("image/") || FILE_TYPE_BROWSERSAFE.includes(mime))
 	) {
@@ -216,14 +217,6 @@ async function proxyHandler(
 		},
 		headers,
 	);
-}
-
-async function withPermit<T>(
-	semaphore: Semaphore,
-	fn: () => Promise<T>,
-): Promise<T> {
-	using _permit = await semaphore.acquire();
-	return await fn();
 }
 
 function fileResponse(
