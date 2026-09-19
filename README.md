@@ -24,9 +24,11 @@ Bun's built-ins cannot fully replace.
   `cacheable-lookup` and `hpagent`.
 - Kept the dependencies that matter for correctness, security and codec
   coverage:
-  - `sharp` + `@misskey-dev/sharp-read-bmp` — image conversion (including SVG
-    rasterisation, animated GIF/WebP, the `badge` pipeline, TIFF/BMP/ICO);
-    re-encoding is also the boundary that strips metadata/polyglot payloads.
+  - `sharp` — image conversion (SVG rasterisation, animated GIF/WebP, the
+    `badge` pipeline, TIFF); re-encoding is also the boundary that strips
+    metadata/polyglot payloads. BMP is decoded with `Bun.Image` first, and ICO
+    is forwarded unchanged (Bun has no ICO decoder and sharp builds may lack
+    BMP support).
   - `file-type` + `is-svg` — content-based type detection (a wrong MIME is a
     type-confusion bug; SVG is excluded for XSS reasons).
   - `ipaddr.js` — private/special IP classification for SSRF.

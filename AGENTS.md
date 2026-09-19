@@ -50,9 +50,11 @@ nix/                     flake package and NixOS module
 
 Only six runtime deps are intentional:
 
-- `sharp` + `@misskey-dev/sharp-read-bmp` — image conversion (SVG rasterisation,
-  animated GIF/WebP, `badge`, TIFF/BMP/ICO). Re-encoding is also the security
-  boundary that strips metadata/polyglot payloads.
+- `sharp` — image conversion (SVG rasterisation, animated GIF/WebP, `badge`,
+  TIFF). Re-encoding is also the security boundary that strips
+  metadata/polyglot payloads. BMP is decoded with `Bun.Image` first (see
+  `openImage`); ICO is forwarded unchanged because Bun has no ICO decoder and
+  sharp builds may lack BMP support.
 - `file-type` + `is-svg` — content sniffing. A wrong MIME is a type-confusion
   bug; SVG is deliberately excluded (XSS).
 - `ipaddr.js` — private/special IP classification for SSRF.
@@ -62,8 +64,9 @@ Prefer Bun built-ins (or `node:*`) over new dependencies. If a new dependency is
 genuinely needed, explain why in the commit and update `nix/misskey-media-proxy.nix`.
 
 **Do not re-add** `fastify`/`@fastify/static` (use `Bun.serve`),
-`content-disposition` (hand-written in `src/web.ts`), or `got` /
-`cacheable-lookup` / `hpagent` (replaced by `src/download.ts`).
+`content-disposition` (hand-written in `src/web.ts`), `got` /
+`cacheable-lookup` / `hpagent` (replaced by `src/download.ts`), or
+`@misskey-dev/sharp-read-bmp` (BMP uses `Bun.Image`; ICO is not converted).
 
 ## Invariants
 
@@ -79,6 +82,9 @@ genuinely needed, explain why in the commit and update `nix/misskey-media-proxy.
 - **Reject SVG.** Never serve raw SVG: it can execute as a document. `sharp`
   rasterises it to webp; if conversion is requested but unsupported, fail rather
   than pass it through.
+- **ICO is always forwarded unchanged**, including when a conversion flag is
+  present (Bun has no ICO decoder). BMP is decoded with `Bun.Image` before the
+  sharp pipeline.
 - **Bound work.** Image conversions go through the `Semaphore`
   (`maxConcurrentConversions`). Enforce `maxSize` both from `content-length` and
   while streaming.

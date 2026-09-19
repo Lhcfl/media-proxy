@@ -17,6 +17,23 @@ export const webpDefault: WebpOptions = {
 	effort: 2,
 };
 
+/**
+ * Opens an image as a sharp pipeline. sharp cannot read BMP in every build, so
+ * BMP is decoded to PNG with Bun.Image first. ICO is not handled here: the
+ * request pipeline forwards ICO files untouched.
+ */
+export async function openImage(
+	path: string,
+	mime: string,
+	animated: boolean,
+): Promise<Sharp> {
+	if (mime === "image/bmp") {
+		const png = await new Bun.Image(path).png().bytes();
+		return sharp(png);
+	}
+	return sharp(path, { animated });
+}
+
 /** Encodes a sharp pipeline that already selected webp as the output. */
 export async function finalize(image: Sharp): Promise<IImage> {
 	return {

@@ -75,7 +75,6 @@ const dictionary = {
 		"image/webp",
 		"image/avif",
 		"image/svg+xml",
-		"image/x-icon",
 		"image/bmp",
 		"image/tiff",
 	],
@@ -86,7 +85,6 @@ const dictionary = {
 		"image/webp",
 		"image/avif",
 		"image/svg+xml",
-		"image/x-icon",
 		"image/bmp",
 	],
 };

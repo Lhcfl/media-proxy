@@ -1,6 +1,5 @@
 import * as fs from "node:fs";
 import { Readable } from "node:stream";
-import { sharpBmp } from "@misskey-dev/sharp-read-bmp";
 import sharp from "sharp";
 import type { Config, ResolvedConfig } from "./config.ts";
 import { resolveConfig } from "./config.ts";
@@ -12,6 +11,7 @@ import {
 	convertSharpToWebp,
 	convertToWebp,
 	finalize,
+	openImage,
 	webpDefault,
 } from "./image-processor.ts";
 import { StatusError } from "./status-error.ts";
@@ -89,7 +89,11 @@ async function proxyHandler(
 			params.has("preview") ||
 			params.has("badge");
 
-		if (wantsImage && !isMimeImage(mime, "sharp-convertible-image")) {
+		if (
+			wantsImage &&
+			mime !== "image/x-icon" &&
+			!isMimeImage(mime, "sharp-convertible-image")
+		) {
 			throw new StatusError("Unexpected mime", 404);
 		}
 
@@ -101,7 +105,11 @@ async function proxyHandler(
 		};
 		let prepared: Prepared | null = null;
 
-		if (params.has("emoji") || params.has("avatar")) {
+		if (mime === "image/x-icon") {
+			// There is no ICO decoder available, so forward the original file even
+			// when a conversion was requested.
+			prepared = passthrough;
+		} else if (params.has("emoji") || params.has("avatar")) {
 			if (
 				!isMimeImage(mime, "sharp-animation-convertible-image") &&
 				!params.has("static")
@@ -112,9 +120,7 @@ async function proxyHandler(
 			} else {
 				const maxHeight = params.has("emoji") ? 128 : 320;
 				prepared = await withPermit(conversions, async () => {
-					const image = (
-						await sharpBmp(tmpPath, mime, { animated: !params.has("static") })
-					)
+					const image = (await openImage(tmpPath, mime, !params.has("static")))
 						.resize({ height: maxHeight, withoutEnlargement: true })
 						.webp(webpDefault);
 					return { kind: "buffer", ...(await finalize(image)) };
@@ -123,16 +129,24 @@ async function proxyHandler(
 		} else if (params.has("static")) {
 			prepared = await withPermit(conversions, async () => ({
 				kind: "buffer",
-				...(await convertSharpToWebp(await sharpBmp(tmpPath, mime), 498, 422)),
+				...(await convertSharpToWebp(
+					await openImage(tmpPath, mime, false),
+					498,
+					422,
+				)),
 			}));
 		} else if (params.has("preview")) {
 			prepared = await withPermit(conversions, async () => ({
 				kind: "buffer",
-				...(await convertSharpToWebp(await sharpBmp(tmpPath, mime), 200, 200)),
+				...(await convertSharpToWebp(
+					await openImage(tmpPath, mime, false),
+					200,
+					200,
+				)),
 			}));
 		} else if (params.has("badge")) {
 			prepared = await withPermit(conversions, async () => {
-				const mask = (await sharpBmp(tmpPath, mime))
+				const mask = (await openImage(tmpPath, mime, false))
 					.resize(96, 96, {
 						fit: "contain",
 						position: "centre",
