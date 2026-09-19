@@ -24,22 +24,10 @@
 		"resolveJsonModule": true,
 		"isolatedModules": true,
 		"rootDir": ".",
-		"types": [
-			"bun",
-			"node"
-		],
-		"typeRoots": [
-			"./node_modules/@types",
-			"./node_modules"
-		],
-		"lib": [
-			"esnext"
-		]
+		"types": ["bun", "node"],
+		"typeRoots": ["./node_modules/@types", "./node_modules"],
+		"lib": ["esnext"]
 	},
 	"compileOnSave": false,
-	"include": [
-		"./src/**/*.ts",
-		"./test/**/*.ts",
-		"./start.ts"
-	],
+	"include": ["./src/**/*.ts", "./test/**/*.ts", "./start.ts"]
 }

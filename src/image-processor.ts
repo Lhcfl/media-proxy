@@ -1,4 +1,4 @@
-import sharp, { type Sharp, type WebpOptions } from 'sharp';
+import sharp, { type Sharp, type WebpOptions } from "sharp";
 
 export type IImage = {
 	data: Buffer;
@@ -21,26 +21,36 @@ export const webpDefault: WebpOptions = {
 export async function finalize(image: Sharp): Promise<IImage> {
 	return {
 		data: await image.toBuffer(),
-		ext: 'webp',
-		type: 'image/webp',
+		ext: "webp",
+		type: "image/webp",
 	};
 }
 
 /** Fits the input inside `width`×`height` (aspect preserved, no upscaling). */
-export async function convertToWebp(path: string, width: number, height: number, options: WebpOptions = webpDefault): Promise<IImage> {
+export async function convertToWebp(
+	path: string,
+	width: number,
+	height: number,
+	options: WebpOptions = webpDefault,
+): Promise<IImage> {
 	return finalize(
 		sharp(path)
-			.resize(width, height, { fit: 'inside', withoutEnlargement: true })
+			.resize(width, height, { fit: "inside", withoutEnlargement: true })
 			.rotate()
 			.webp(options),
 	);
 }
 
 /** Same as convertToWebp but for an already-constructed sharp pipeline. */
-export async function convertSharpToWebp(image: Sharp, width: number, height: number, options: WebpOptions = webpDefault): Promise<IImage> {
+export async function convertSharpToWebp(
+	image: Sharp,
+	width: number,
+	height: number,
+	options: WebpOptions = webpDefault,
+): Promise<IImage> {
 	return finalize(
 		image
-			.resize(width, height, { fit: 'inside', withoutEnlargement: true })
+			.resize(width, height, { fit: "inside", withoutEnlargement: true })
 			.rotate()
 			.webp(options),
 	);

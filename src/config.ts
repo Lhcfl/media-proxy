@@ -1,6 +1,6 @@
-import { resolve, extname } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import type { DownloadConfig } from './download.ts';
+import { extname, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import type { DownloadConfig } from "./download.ts";
 
 export type Config = {
 	/** User-Agent used for downloads. */
@@ -9,9 +9,9 @@ export type Config = {
 	allowedPrivateNetworks?: string[];
 	/** Maximum download size in bytes. */
 	maxSize?: number;
-	'Access-Control-Allow-Origin'?: string;
-	'Access-Control-Allow-Headers'?: string;
-	'Content-Security-Policy'?: string;
+	"Access-Control-Allow-Origin"?: string;
+	"Access-Control-Allow-Headers"?: string;
+	"Content-Security-Policy"?: string;
 	/** Forward proxy URL (also read from HTTP_PROXY / HTTPS_PROXY). */
 	proxy?: string;
 	/** Cap on simultaneous image conversions. Defaults to 4. */
@@ -28,22 +28,26 @@ export type ResolvedConfig = {
 	download: DownloadConfig;
 };
 
-const DEFAULT_CSP = "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'";
+const DEFAULT_CSP =
+	"default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'";
 
 export function resolveConfig(input?: Config | null): ResolvedConfig {
 	const config = input ?? {};
 
-	const proxy = config.proxy
-		?? process.env.HTTP_PROXY ?? process.env.http_proxy
-		?? process.env.HTTPS_PROXY ?? process.env.https_proxy;
+	const proxy =
+		config.proxy ??
+		process.env.HTTP_PROXY ??
+		process.env.http_proxy ??
+		process.env.HTTPS_PROXY ??
+		process.env.https_proxy;
 
 	return {
-		corsOrigin: config['Access-Control-Allow-Origin'] ?? '*',
-		corsHeaders: config['Access-Control-Allow-Headers'] ?? '*',
-		csp: config['Content-Security-Policy'] ?? DEFAULT_CSP,
+		corsOrigin: config["Access-Control-Allow-Origin"] ?? "*",
+		corsHeaders: config["Access-Control-Allow-Headers"] ?? "*",
+		csp: config["Content-Security-Policy"] ?? DEFAULT_CSP,
 		maxConcurrentConversions: config.maxConcurrentConversions ?? 4,
 		download: {
-			userAgent: config.userAgent ?? 'MisskeyMediaProxy/0.0.0',
+			userAgent: config.userAgent ?? "MisskeyMediaProxy/0.0.0",
 			allowedPrivateNetworks: config.allowedPrivateNetworks ?? [],
 			maxSize: config.maxSize ?? 262144000,
 			proxy: proxy ?? false,
@@ -53,15 +57,15 @@ export function resolveConfig(input?: Config | null): ResolvedConfig {
 }
 
 const DEFAULT_CONFIG_FILES = [
-	'config.toml',
-	'config.yaml',
-	'config.yml',
-	'config.json',
-	'config.jsonc',
-	'config.json5',
-	'config.js',
-	'config.mjs',
-	'config.ts',
+	"config.toml",
+	"config.yaml",
+	"config.yml",
+	"config.json",
+	"config.jsonc",
+	"config.json5",
+	"config.js",
+	"config.mjs",
+	"config.ts",
 ];
 
 /**
@@ -72,7 +76,9 @@ const DEFAULT_CONFIG_FILES = [
  * Data formats are parsed with Bun's built-in parsers, so a NixOS module can
  * generate plain TOML/YAML/JSON instead of JavaScript.
  */
-export async function loadConfig(explicitPath?: string): Promise<Config | null> {
+export async function loadConfig(
+	explicitPath?: string,
+): Promise<Config | null> {
 	if (explicitPath) {
 		return parseConfigFile(resolve(process.cwd(), explicitPath));
 	}
@@ -88,19 +94,23 @@ export async function loadConfig(explicitPath?: string): Promise<Config | null> 
 async function parseConfigFile(path: string): Promise<Config> {
 	const ext = extname(path).toLowerCase();
 
-	if (ext === '.js' || ext === '.mjs' || ext === '.cjs' || ext === '.ts') {
+	if (ext === ".js" || ext === ".mjs" || ext === ".cjs" || ext === ".ts") {
 		const module = await import(pathToFileURL(path).href);
 		return (module.default ?? module) as Config;
 	}
 
 	const text = await Bun.file(path).text();
 	switch (ext) {
-		case '.toml': return Bun.TOML.parse(text) as Config;
-		case '.yaml':
-		case '.yml': return Bun.YAML.parse(text) as Config;
-		case '.json':
-		case '.jsonc': return Bun.JSONC.parse(text) as Config;
-		case '.json5': return Bun.JSON5.parse(text) as Config;
+		case ".toml":
+			return Bun.TOML.parse(text) as Config;
+		case ".yaml":
+		case ".yml":
+			return Bun.YAML.parse(text) as Config;
+		case ".json":
+		case ".jsonc":
+			return Bun.JSONC.parse(text) as Config;
+		case ".json5":
+			return Bun.JSON5.parse(text) as Config;
 		default:
 			throw new Error(`Unsupported config file extension: ${ext} (${path})`);
 	}

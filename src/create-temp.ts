@@ -1,4 +1,4 @@
-import * as tmp from 'tmp';
+import * as tmp from "tmp";
 
 /**
  * Creates a scratch file with mode 0600 in the system temp directory.
