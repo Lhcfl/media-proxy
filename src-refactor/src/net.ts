@@ -1,5 +1,4 @@
 import { isIP } from 'node:net';
-import { lookup } from 'node:dns/promises';
 import { StatusError } from './status-error.ts';
 
 /**
@@ -173,7 +172,7 @@ export async function assertHostAllowed(hostname: string, allowed: string[]): Pr
 
 	let addresses: Array<{ address: string }>;
 	try {
-		addresses = await lookup(host, { all: true });
+		addresses = await Bun.dns.lookup(host);
 	} catch {
 		// Let fetch produce the real error for unresolvable hosts.
 		return;

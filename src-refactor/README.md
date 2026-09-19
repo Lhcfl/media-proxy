@@ -14,44 +14,97 @@ This is an experiment: it is runnable and exercises the same endpoints, but see
 | ------------------------------- | -------------------------------------------------- |
 | `fastify` + `@fastify/static`   | `Bun.serve` + `Bun.file`                            |
 | `sharp` + `@misskey-dev/sharp-read-bmp` | `Bun.Image` (libjpeg-turbo / spng / libwebp) |
-| `got` + `cacheable-lookup` + `hpagent` | `fetch` (env proxies, `proxy`, `AbortSignal`) |
+| `got` + `cacheable-lookup` + `hpagent` | `fetch` (env proxies, `proxy`, `AbortSignal`) + `Bun.dns.lookup` |
 | `file-type`                     | ~180 lines of magic-number sniffing (`file-info.ts`) |
 | `is-svg`                        | inline heuristic                                    |
 | `ipaddr.js`                     | inline IPv4/IPv6 + CIDR parser (`net.ts`)           |
 | `content-disposition`           | inline RFC 6266/5987 formatter (`http.ts`)          |
 | `tmp`                           | `node:fs/promises` + `os.tmpdir()` + `randomUUID`   |
 | `typescript` (build step)       | none — Bun runs the `.ts` sources directly          |
+| config `import`ing `config.js`  | `Bun.TOML` / `Bun.YAML` / `Bun.JSONC` / `Bun.JSON5` |
 
-`node:fs`, `node:os`, `node:crypto`, `node:net`, `node:dns` and `node:path` are
-used, but all ship with the Bun runtime.
+`node:fs`, `node:os`, `node:crypto`, `node:net` and `node:path` are used, but
+all ship with the Bun runtime. `node:fs` is only used to create the scratch file
+with `0600` permissions inside a `0700` directory (`Bun.write` cannot set modes).
+
+There is no Bun equivalent for some of the hand-written helpers — checked
+against the full [`Bun` reference](https://bun.com/reference/bun):
+
+- no content-based MIME sniffing (`Bun.file().type` is extension-only and returns
+  `application/octet-stream` for an extensionless file), so `file-info.ts` stays;
+- no IP/CIDR classification, so `net.ts` stays (only the DNS lookup uses
+  `Bun.dns.lookup`);
+- no `Content-Disposition` builder, so `http.ts` stays;
+- no temp-file primitive, so `create-temp.ts` stays.
+
+Likewise `Bun.Image` only exposes `resize`/`rotate`/`flip`/`flop`/`modulate`,
+`fit: "fill" | "inside"` and no raw pixels, compositing, animation or
+`normalise` — which is exactly why the badge and animation deviations below
+exist.
 
 ## Layout
 
 ```
-start.ts                 entry point: load config.js, Bun.serve on 127.0.0.1
+start.ts                 entry point: load config, Bun.serve on 127.0.0.1
 src/index.ts             request routing, proxy pipeline, response/error handling
-src/config.ts            config defaults and normalisation
+src/config.ts            config types, defaults, and multi-format loader
 src/download.ts          fetch + streaming download with size cap and SSRF guard
 src/file-info.ts         magic-number type detection + mime dictionaries
 src/image-processor.ts   Bun.Image pipelines (webp / badge png)
-src/net.ts               private-IP and CIDR checks
+src/net.ts               private-IP and CIDR checks (Bun.dns + inline parser)
 src/create-temp.ts       private scratch files, always cleaned up
 src/http.ts              semaphore, headers, Content-Disposition
 src/const.ts             browser-safe / convertible mime lists
-config.example.js        copy to config.js
+config.example.toml      copy to config.toml
+config.example.js        same, as JavaScript
 ```
 
 ## Run
 
 ```fish
 cd src-refactor
-cp config.example.js config.js
+cp config.example.toml config.toml
 bun start.ts          # or: bun run start
 bun --watch start.ts  # dev
 ```
 
-`PORT` (default 3000) and `MISSKEY_MEDIA_PROXY_CONFIG` (default `./config.js`)
-are honoured. The server always binds to `127.0.0.1`, like the original.
+`PORT` (default 3000) is honoured. The server always binds to `127.0.0.1`,
+like the original.
+
+### Configuration
+
+`MISSKEY_MEDIA_PROXY_CONFIG` may point at a `.toml`, `.yaml`, `.yml`, `.json`,
+`.jsonc`, `.json5`, `.js` or `.ts` file. Without it, the first `config.*` in the
+working directory is loaded (order: toml, yaml, yml, json, jsonc, json5, js,
+mjs, ts). If nothing is found, built-in defaults are used.
+
+The options are the same as the original (`userAgent`, `allowedPrivateNetworks`,
+`maxSize`, CORS/CSP keys, `proxy`), plus `maxConcurrentConversions` and
+`downloadTimeoutMs`.
+
+Because Bun parses TOML/YAML/JSON natively, a NixOS module can generate the file
+instead of shipping JavaScript:
+
+```nix
+{ pkgs, ... }:
+let
+  configFile = (pkgs.formats.toml { }).generate "config.toml" {
+    userAgent = "MisskeyMediaProxy";
+    allowedPrivateNetworks = [ ];
+    maxSize = 262144000;
+    "Access-Control-Allow-Origin" = "*";
+    "Access-Control-Allow-Headers" = "*";
+    "Content-Security-Policy" =
+      "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'";
+    maxConcurrentConversions = 4;
+  };
+in {
+  systemd.services.misskey-media-proxy-bun = {
+    environment.MISSKEY_MEDIA_PROXY_CONFIG = "${configFile}";
+    # ...
+  };
+}
+```
 
 `Bun.serve` defaults to a 10 s idle timeout; for very slow upstream downloads
 raise `downloadTimeoutMs` and `Bun.serve({ idleTimeout })` accordingly.

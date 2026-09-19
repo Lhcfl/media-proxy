@@ -1,18 +1,15 @@
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { loadConfig } from './src/config.ts';
 import { createHandler } from './src/index.ts';
-import type { Config } from './src/config.ts';
 
-// Same convention as the original server: read config.js from the working
-// directory, overridable through MISSKEY_MEDIA_PROXY_CONFIG.
-const configPath = process.env.MISSKEY_MEDIA_PROXY_CONFIG ?? './config.js';
+// MISSKEY_MEDIA_PROXY_CONFIG may point at a .toml / .yaml / .json / .js file.
+// Without it the first config.* in the working directory is used.
+const configPath = process.env.MISSKEY_MEDIA_PROXY_CONFIG;
 
-let config: Config | null = null;
+let config;
 try {
-	const module = await import(pathToFileURL(resolve(process.cwd(), configPath)).href);
-	config = (module.default ?? null) as Config | null;
+	config = await loadConfig(configPath);
 } catch (error) {
-	console.error(`Failed to load config from ${configPath}:`, error);
+	console.error(`Failed to load config${configPath ? ` from ${configPath}` : ''}:`, error);
 	process.exit(1);
 }
 
@@ -27,4 +24,4 @@ const server = Bun.serve({
 	fetch: createHandler(config),
 });
 
-console.log(`Misskey media proxy (Bun) listening on ${server.url}`);
+console.log(`Misskey media proxy (Bun) listening on ${server.url}${configPath ? ` (config: ${configPath})` : ''}`);
