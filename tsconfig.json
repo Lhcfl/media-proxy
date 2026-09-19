@@ -39,6 +39,7 @@
 	"compileOnSave": false,
 	"include": [
 		"./src/**/*.ts",
+		"./test/**/*.ts",
 		"./start.ts"
 	],
 }

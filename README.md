@@ -20,19 +20,22 @@ Bun's built-ins cannot fully replace.
 - Runs on Bun instead of Node.js. `Bun.serve` replaces
   `fastify` + `@fastify/static`, and Bun runs the TypeScript sources directly,
   so there is no build step.
-- Dropped `fastify`, `@fastify/static` and `content-disposition`.
+- Dropped `fastify`, `@fastify/static`, `content-disposition`, `got`,
+  `cacheable-lookup` and `hpagent`.
 - Kept the dependencies that matter for correctness, security and codec
   coverage:
   - `sharp` + `@misskey-dev/sharp-read-bmp` — image conversion (including SVG
     rasterisation, animated GIF/WebP, the `badge` pipeline, TIFF/BMP/ICO);
     re-encoding is also the boundary that strips metadata/polyglot payloads.
-  - `got` + `cacheable-lookup` + `hpagent` — downloads with timeouts and size
-    limits, DNS caching, forward-proxy support, and access to the connected
-    peer IP used for SSRF checks.
   - `file-type` + `is-svg` — content-based type detection (a wrong MIME is a
     type-confusion bug; SVG is excluded for XSS reasons).
   - `ipaddr.js` — private/special IP classification for SSRF.
   - `tmp` — scratch files with `0600` permissions.
+- Downloads use Node's `node:http`/`node:https` (implemented by Bun) with a
+  thin callback adapter over `Bun.dns.lookup`, so the connected peer IP is
+  still available for SSRF checks. Forward proxies (`HTTP_PROXY`/`HTTPS_PROXY`)
+  are handled by the same code: absolute-form for HTTP and `CONNECT` + TLS for
+  HTTPS.
 - Configuration can be TOML, YAML, JSON or JavaScript, parsed with Bun's
   built-in parsers. The NixOS module now generates TOML.
 - Fixed a temporary-file leak: cleanup is unconditional (upstream disabled it
@@ -95,6 +98,7 @@ Requires Bun 1.4+. The server runs the TypeScript sources directly.
 ```fish
 bun install
 bun run typecheck   # tsc, type-check only
+bun test            # bun:test suite (downloads, SSRF, proxy, size limits)
 bun start           # or: bun run start
 bun --watch run ./start.ts   # dev
 ```
@@ -140,6 +144,7 @@ described in [`SPECIFICATION.md`](./SPECIFICATION.md).
 ```fish
 bun update --latest
 bun run typecheck
+bun test
 ```
 
 When `bun.lock` changes, reset `bunCache`'s `outputHash` in

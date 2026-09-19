@@ -41,7 +41,7 @@
         outputHashMode = "recursive";
         outputHashAlgo = "sha256";
         # Reset to lib.fakeHash, build, and copy the hash from the error.
-        outputHash = "sha256-vLVs612vjXVRcYqnIjBjR+uDDmIdKyWmNge6NJ45dP0=";
+        outputHash = "sha256-wc0IPjKt6Yn5puK0Qqm/+DPQy1Bb7uncFeWedwYMP/A=";
 
         buildCommand = ''
           export HOME=$TMPDIR

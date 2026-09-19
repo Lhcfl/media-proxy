@@ -1,6 +1,5 @@
 import { resolve, extname } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { getAgents } from './agents.ts';
 import type { DownloadConfig } from './download.ts';
 
 export type Config = {
@@ -17,6 +16,8 @@ export type Config = {
 	proxy?: string;
 	/** Cap on simultaneous image conversions. Defaults to 4. */
 	maxConcurrentConversions?: number;
+	/** Whole-download timeout in milliseconds. Defaults to 60000. */
+	downloadTimeoutMs?: number;
 };
 
 export type ResolvedConfig = {
@@ -45,8 +46,8 @@ export function resolveConfig(input?: Config | null): ResolvedConfig {
 			userAgent: config.userAgent ?? 'MisskeyMediaProxy/0.0.0',
 			allowedPrivateNetworks: config.allowedPrivateNetworks ?? [],
 			maxSize: config.maxSize ?? 262144000,
-			...getAgents(proxy),
-			proxy: !!proxy,
+			proxy: proxy ?? false,
+			operationTimeout: config.downloadTimeoutMs ?? 60_000,
 		},
 	};
 }
