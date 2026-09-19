@@ -67,7 +67,9 @@ binaries are shipped.
 ```
 
 The module generates `config.js` from `settings`, points the service at it via
-`MISSKEY_MEDIA_PROXY_CONFIG`, and runs the server as a hardened `DynamicUser`.
+`MISSKEY_MEDIA_PROXY_CONFIG`, sets `NODE_ENV=production` (so temporary files are
+cleaned up and downloads to private networks are blocked unless listed in
+`allowedPrivateNetworks`), and runs the server as a hardened `DynamicUser`.
 The server always binds to `127.0.0.1`; put a reverse proxy in front of it if it
 needs to be reachable from elsewhere.
 

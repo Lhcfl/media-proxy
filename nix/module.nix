@@ -67,6 +67,11 @@ in
       environment = {
         PORT = toString cfg.port;
         MISSKEY_MEDIA_PROXY_CONFIG = configFile;
+        # Enables the private-network (SSRF) check during downloads and makes
+        # createTemp() actually delete its temporary files. Without this the
+        # cleanup callback becomes a no-op and every downloaded file leaks into
+        # the service's private tmpfs (PrivateTmp = true), i.e. into RAM.
+        NODE_ENV = "production";
       };
 
       serviceConfig = {
