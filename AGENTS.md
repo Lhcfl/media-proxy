@@ -38,6 +38,7 @@ src/config.ts            config types, defaults, multi-format loader
 src/download.ts          downloads: node:http/https, Bun.dns, proxy, SSRF, size limits
 src/file-info.ts         content-based MIME detection + mime dictionaries
 src/image-processor.ts   sharp webp pipelines
+src/stats.ts             in-memory counters + /stats HTML page
 src/create-temp.ts       private scratch files
 src/web.ts               semaphore, headers, Content-Disposition, filenames
 src/const.ts             browser-safe / convertible mime lists

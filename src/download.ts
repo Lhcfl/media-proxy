@@ -358,7 +358,7 @@ async function streamToFile(
 	path: string,
 	maxSize: number,
 	contentEncoding: string | undefined,
-): Promise<void> {
+): Promise<number> {
 	let total = 0;
 	const limiter = new Transform({
 		transform(chunk: Buffer, _encoding, callback) {
@@ -392,13 +392,15 @@ async function streamToFile(
 			...streams: Array<NodeJS.ReadableStream | NodeJS.WritableStream>
 		) => Promise<void>
 	)(...stages);
+
+	return total;
 }
 
 export async function downloadUrl(
 	url: string,
 	path: string,
 	settings: DownloadConfig = defaultDownloadConfig,
-): Promise<{ filename: string }> {
+): Promise<{ filename: string; size: number }> {
 	const proxy = settings.proxy ? parseProxy(settings.proxy) : null;
 	const operationTimeout = settings.operationTimeout ?? 60_000;
 
@@ -471,13 +473,13 @@ export async function downloadUrl(
 			const filename =
 				fromHeader ?? (current.pathname.split("/").pop() || "unknown");
 
-			await streamToFile(
+			const size = await streamToFile(
 				result.stream,
 				path,
 				settings.maxSize,
 				result.headers["content-encoding"],
 			);
-			return { filename };
+			return { filename, size };
 		}
 	} finally {
 		clearTimeout(overallTimer);

@@ -14,6 +14,7 @@ import {
 	openImage,
 	webpDefault,
 } from "./image-processor.ts";
+import { renderStatsPage, Stats } from "./stats.ts";
 import { StatusError } from "./status-error.ts";
 import {
 	baseHeaders,
@@ -33,13 +34,16 @@ export function createHandler(
 ): (request: Request) => Promise<Response> {
 	const resolved = resolveConfig(config);
 	const conversions = new Semaphore(resolved.maxConcurrentConversions);
-	return (request: Request) => handleRequest(request, resolved, conversions);
+	const stats = new Stats();
+	return (request: Request) =>
+		handleRequest(request, resolved, conversions, stats);
 }
 
 async function handleRequest(
 	request: Request,
 	config: ResolvedConfig,
 	conversions: Semaphore,
+	stats: Stats,
 ): Promise<Response> {
 	if (request.method === "OPTIONS") {
 		return new Response(null, { status: 204, headers: baseHeaders(config) });
@@ -49,8 +53,15 @@ async function handleRequest(
 	}
 
 	const url = new URL(request.url);
+	if (url.pathname === "/stats") {
+		const headers = baseHeaders(config);
+		headers.set("Content-Type", "text/html; charset=utf-8");
+		headers.set("Cache-Control", "no-store");
+		return new Response(renderStatsPage(stats.snapshot()), { headers });
+	}
+
 	try {
-		return await proxyHandler(request, url, config, conversions);
+		return await proxyHandler(request, url, config, conversions, stats);
 	} catch (error) {
 		return errorHandler(url, config, error);
 	}
@@ -70,6 +81,7 @@ async function proxyHandler(
 	url: URL,
 	config: ResolvedConfig,
 	conversions: Semaphore,
+	stats: Stats,
 ): Promise<Response> {
 	const params = url.searchParams;
 	const target = resolveTarget(url);
@@ -78,7 +90,11 @@ async function proxyHandler(
 	}
 
 	await using temp = await TempFile.create();
-	const { filename } = await downloadUrl(target, temp.path, config.download);
+	const { filename, size } = await downloadUrl(
+		target,
+		temp.path,
+		config.download,
+	);
 	const { mime, ext } = await detectType(temp.path);
 
 	const wantsImage =
@@ -158,8 +174,8 @@ async function proxyHandler(
 			.flatten({ background: "#000" })
 			.toColorspace("b-w");
 
-		const stats = await mask.clone().stats();
-		if (stats.entropy < 0.1) {
+		const maskStats = await mask.clone().stats();
+		if (maskStats.entropy < 0.1) {
 			// Not enough detail to be a useful badge.
 			throw new StatusError("Skip to provide badge", 404);
 		}
@@ -195,6 +211,9 @@ async function proxyHandler(
 	}
 
 	prepared ??= passthrough;
+
+	const served = prepared.kind === "buffer" ? prepared.data.length : size;
+	stats.record(size, served);
 
 	const headers = baseHeaders(config);
 	headers.set("Content-Type", prepared.type);
